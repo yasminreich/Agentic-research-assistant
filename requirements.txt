@@ -1,0 +1,12 @@
+# Maintained classic AutoGen (AG2) with Anthropic/Claude support.
+# The import path remains `import autogen`.
+ag2[anthropic]>=0.7
+
+# Backend server
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
+# HTTP + config
+requests>=2.31
+pydantic-settings>=2.2
+python-dotenv>=1.0
