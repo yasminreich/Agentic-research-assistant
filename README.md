@@ -34,22 +34,51 @@ recency) live in plain Python so they're auditable. Semantic steps (relevance,
 
 Requires Python 3.10+.
 
+**1. Install dependencies:**
+
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # then edit .env
 ```
 
-Set `ANTHROPIC_API_KEY` in `.env` — that's the only required credential. The
-literature backend (OpenAlex) needs **no API key**. Optionally set
-`OPENALEX_MAILTO` to your email to use OpenAlex's faster "polite pool".
+**2. Create your configuration file.** The repo does **not** ship a `.env` file —
+it's gitignored so secrets never get committed. You must create your own by
+copying the template `.env.example` (which *is* in the repo):
+
+```bash
+cp .env.example .env      # macOS/Linux/Git Bash
+# Windows PowerShell:  Copy-Item .env.example .env
+```
+
+Then open `.env` and set your Anthropic key:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+That's the only **required** value. The literature backend (OpenAlex) needs
+**no API key**. Optionally set `OPENALEX_MAILTO` to your email for OpenAlex's
+faster "polite pool". If `.env` is missing or `ANTHROPIC_API_KEY` is blank, the
+server returns a clear `503` error when you make a request.
+
+> Note: your research **question is not stored in any config file** — you pass it
+> in the request itself (see below). `.env` only holds settings/credentials.
 
 ## Run
 
+The app is a server you leave running, plus a request you send to it. **You need
+two terminals** (both with this project's environment / virtualenv active).
+
+**Terminal 1 — start the server and leave it running:**
+
 ```bash
-python run.py            # serves on http://0.0.0.0:8000
+python run.py            # serves on http://0.0.0.0:8000 — keep this open
 ```
 
-Then:
+You'll see uvicorn startup logs. Leave this terminal running; it processes each
+research request and prints progress. (Stop it later with `Ctrl+C`.)
+
+**Terminal 2 — send your research question.** The question goes in the `question`
+field of the JSON body — **replace the example text with your own question:**
 
 ```bash
 curl -X POST http://localhost:8000/research \
@@ -57,21 +86,32 @@ curl -X POST http://localhost:8000/research \
   -d '{"question": "Does intermittent fasting improve insulin sensitivity in adults?"}'
 ```
 
-Response:
+> On **Windows PowerShell**, `curl` is an alias for `Invoke-WebRequest` and the
+> single-quote/JSON escaping differs. Use this instead:
+>
+> ```powershell
+> Invoke-RestMethod -Uri http://localhost:8000/research -Method Post `
+>   -ContentType "application/json" `
+>   -Body '{"question": "Does intermittent fasting improve insulin sensitivity in adults?"}'
+> ```
+
+A run takes roughly 1–2 minutes (the agents make several LLM + search
+round-trips). When it finishes, Terminal 2 prints the response:
 
 ```json
 {
   "question": "...",
   "summary": "...",
-  "paper_count": 7,
+  "paper_count": 6,
   "saved": true,
-  "json_path": "output/20260628-...-does-intermittent-fasting.json",
-  "markdown_path": "output/20260628-...-does-intermittent-fasting.md"
+  "json_path": "output/20260629-...-does-intermittent-fasting.json",
+  "markdown_path": "output/20260629-...-does-intermittent-fasting.md"
 }
 ```
 
 The full report (summary + every selected paper with authors, journal, year,
-citations, DOI) is written to the `output/` directory in both JSON and Markdown.
+citations, DOI) is written to the `output/` directory in both JSON and Markdown
+at the paths shown in the response.
 
 ## Smoke test before a full run
 
