@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Research Assistant</title>
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --card: #ffffff;
+      --text: #1a1a1e;
+      --muted: #63636b;
+      --border: #e2e2e6;
+      --accent: #3b5bdb;
+      --accent-text: #ffffff;
+      --error-bg: #fdecec;
+      --error-text: #a11b1b;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16161a;
+        --card: #1f1f25;
+        --text: #ececf0;
+        --muted: #9a9aa4;
+        --border: #33333c;
+        --accent: #6b85ff;
+        --accent-text: #10101a;
+        --error-bg: #3a1f1f;
+        --error-text: #ff9d9d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+    header h1 { font-size: 1.6rem; margin: 0 0 4px; }
+    header p { color: var(--muted); margin: 0 0 28px; }
+    label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 6px; }
+    textarea, input[type="password"] {
+      width: 100%;
+      padding: 12px 14px;
+      font: inherit;
+      color: var(--text);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      resize: vertical;
+    }
+    textarea { min-height: 90px; }
+    textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .row { margin-bottom: 16px; }
+    .hint { color: var(--muted); font-size: 0.8rem; margin-top: 6px; }
+    button {
+      font: inherit;
+      font-weight: 600;
+      color: var(--accent-text);
+      background: var(--accent);
+      border: none;
+      border-radius: 10px;
+      padding: 12px 22px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .status {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin-top: 24px;
+      color: var(--muted);
+    }
+    .status.show { display: flex; }
+    .spinner {
+      width: 20px; height: 20px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      flex: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error {
+      display: none;
+      margin-top: 24px;
+      padding: 14px 16px;
+      background: var(--error-bg);
+      color: var(--error-text);
+      border-radius: 10px;
+      font-size: 0.92rem;
+    }
+    .error.show { display: block; }
+    #results { margin-top: 32px; }
+    .summary {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 22px;
+    }
+    .summary h2 { margin-top: 0; font-size: 1.15rem; }
+    .summary h3 { font-size: 1rem; }
+    .summary p { margin: 0 0 12px; }
+    .papers-title { font-size: 1.05rem; margin: 30px 0 12px; }
+    .paper {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+    .paper .ttl { font-weight: 600; }
+    .paper .meta { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+    .paper a { color: var(--accent); word-break: break-word; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Research Assistant</h1>
+      <p>Ask a research question. Two AI agents review high-impact scientific
+         literature and write you a grounded summary.</p>
+    </header>
+
+    <form id="form">
+      <div class="row">
+        <label for="question">Research question</label>
+        <textarea id="question" maxlength="500"
+          placeholder="e.g. Does intermittent fasting improve insulin sensitivity in adults?"></textarea>
+        <div class="hint">A focused, answerable question works best. Max 500 characters.</div>
+      </div>
+      <div class="row" id="pw-row">
+        <label for="password">Access password</label>
+        <input type="password" id="password" placeholder="Password given to you by the owner" />
+        <div class="hint">Entered once, then remembered on this device.</div>
+      </div>
+      <button type="submit" id="submit">Run literature review</button>
+    </form>
+
+    <div class="status" id="status">
+      <div class="spinner"></div>
+      <div>Reviewing the literature… this usually takes 1–2 minutes.</div>
+    </div>
+    <div class="error" id="error"></div>
+    <div id="results"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById("form");
+    const questionEl = document.getElementById("question");
+    const passwordEl = document.getElementById("password");
+    const submitBtn = document.getElementById("submit");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const resultsEl = document.getElementById("results");
+
+    // Remember the password on this device so testers enter it only once.
+    passwordEl.value = localStorage.getItem("ra_password") || "";
+
+    function escapeHtml(s) {
+      return (s || "").replace(/[&<>"']/g, c => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+
+    // Minimal, safe Markdown-ish renderer for the summary text.
+    function renderMarkdown(md) {
+      const blocks = escapeHtml(md).split(/\n{2,}/);
+      const html = [];
+      let list = null;
+      const flush = () => { if (list) { html.push("<ul>" + list.join("") + "</ul>"); list = null; } };
+      for (const raw of blocks) {
+        const block = raw.trim();
+        if (!block) continue;
+        const inline = t => t
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\*(.+?)\*/g, "<em>$1</em>");
+        const h = block.match(/^(#{1,4})\s+(.*)$/);
+        if (h) { flush(); const n = h[1].length; html.push(`<h${n + 1}>${inline(h[2])}</h${n + 1}>`); continue; }
+        const lines = block.split("\n");
+        if (lines.every(l => /^\s*[-*]\s+/.test(l))) {
+          list = list || [];
+          for (const l of lines) list.push("<li>" + inline(l.replace(/^\s*[-*]\s+/, "")) + "</li>");
+          continue;
+        }
+        flush();
+        html.push("<p>" + inline(lines.join(" ")) + "</p>");
+      }
+      flush();
+      return html.join("");
+    }
+
+    function paperLink(p) {
+      if (p.doi) return "https://doi.org/" + p.doi;
+      return p.url || null;
+    }
+
+    function authorList(authors) {
+      if (!authors || !authors.length) return "Unknown authors";
+      if (authors.length <= 3) return authors.join(", ");
+      return authors.slice(0, 3).join(", ") + ", et al.";
+    }
+
+    function renderResults(data) {
+      let html = "";
+      if (data.summary) {
+        html += '<div class="summary"><h2>Summary</h2>' + renderMarkdown(data.summary) + "</div>";
+      }
+      const papers = data.papers || [];
+      html += `<div class="papers-title">Selected papers (${data.paper_count || papers.length})</div>`;
+      if (!papers.length) {
+        html += '<p style="color:var(--muted)">No papers met the high-impact criteria.</p>';
+      }
+      for (const p of papers) {
+        const link = paperLink(p);
+        const journal = p.journal_name || p.venue || "Unknown venue";
+        const year = p.year || "n.d.";
+        const cites = (p.citation_count ?? 0) + " citations";
+        html += '<div class="paper">';
+        html += '<div class="ttl">' + escapeHtml(p.title || "Untitled") + "</div>";
+        html += '<div class="meta">' + escapeHtml(authorList(p.authors)) + " — " +
+                escapeHtml(journal) + " (" + escapeHtml(String(year)) + ") · " + cites + "</div>";
+        if (link) {
+          html += '<div class="meta"><a href="' + escapeHtml(link) +
+                  '" target="_blank" rel="noopener">' + escapeHtml(link) + "</a></div>";
+        }
+        html += "</div>";
+      }
+      resultsEl.innerHTML = html;
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.classList.add("show");
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const question = questionEl.value.trim();
+      const password = passwordEl.value;
+      errorEl.classList.remove("show");
+      resultsEl.innerHTML = "";
+      if (question.length < 3) { showError("Please enter a research question."); return; }
+
+      localStorage.setItem("ra_password", password);
+      submitBtn.disabled = true;
+      statusEl.classList.add("show");
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 180000); // 3 min
+
+      try {
+        const resp = await fetch("/research", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Access-Password": password },
+          body: JSON.stringify({ question }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (resp.status === 401) {
+          localStorage.removeItem("ra_password");
+          showError("Invalid access password. Check with whoever shared this link.");
+          return;
+        }
+        if (!resp.ok) {
+          let detail = "Something went wrong (" + resp.status + ").";
+          try { const j = await resp.json(); if (j.detail) detail = j.detail; } catch (_) {}
+          showError(detail);
+          return;
+        }
+
+        const data = await resp.json();
+        if (!data.saved && !data.summary) {
+          showError("No relevant high-impact papers were found for that question. Try rephrasing.");
+          return;
+        }
+        renderResults(data);
+      } catch (err) {
+        clearTimeout(timeout);
+        if (err.name === "AbortError") {
+          showError("The request timed out. The service may be busy — please try again.");
+        } else {
+          showError("Network error. Please check your connection and try again.");
+        }
+      } finally {
+        submitBtn.disabled = false;
+        statusEl.classList.remove("show");
+      }
+    });
+  </script>
+</body>
+</html>

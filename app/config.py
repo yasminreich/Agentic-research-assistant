@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     # --- Output ---
     output_dir: str = "output"
 
+    # --- Web UI / sharing guardrails ---
+    # Shared password testers must enter to run a research query. When set, the
+    # public UI is usable only by people you give the password to. Blank = no
+    # password (fine for local use; set it before exposing a public URL).
+    access_password: str = ""
+    # Safety cap on total research runs per calendar day (UTC), across all users.
+    # Bounds worst-case daily API cost. The real hard cap is the Anthropic
+    # Console monthly spend limit; this is a lighter in-app backstop.
+    max_runs_per_day: int = 50
+    # Reject questions longer than this many characters (avoids giant inputs).
+    max_question_chars: int = 500
+
 
 @lru_cache
 def get_settings() -> Settings:
