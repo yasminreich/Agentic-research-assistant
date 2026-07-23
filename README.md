@@ -14,6 +14,10 @@ The system targets **high-impact, reputable journals**, **deduplicates by
 recency** (when several papers reach the same conclusion, the most recent wins),
 and **saves** the summary plus all selected papers to disk.
 
+## What it looks like
+
+![The Research Assistant web page — type a question, then read the summary and papers.](docs/screenshots/landing.svg)
+
 ## How it works
 
 ```

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <rect x="1" y="1" width="958" height="468" rx="14" fill="#f7f7f8" stroke="#e2e2e6"/>
+  <!-- browser chrome -->
+  <path d="M1 15 a14 14 0 0 1 14 -14 h930 a14 14 0 0 1 14 14 v31 h-958 z" fill="#edeef0"/>
+  <line x1="1" y1="46" x2="959" y2="46" stroke="#e2e2e6"/>
+  <circle cx="28" cy="23" r="6" fill="#ff5f57"/>
+  <circle cx="48" cy="23" r="6" fill="#febc2e"/>
+  <circle cx="68" cy="23" r="6" fill="#28c840"/>
+  <rect x="120" y="11" width="360" height="24" rx="12" fill="#ffffff" stroke="#e2e2e6"/>
+  <text x="140" y="28" font-size="12" fill="#63636b">localhost:8000</text>
+  <!-- content -->
+  <text x="48" y="112" font-size="30" font-weight="700" fill="#1a1a1e">Research Assistant</text>
+  <text x="48" y="145" font-size="16" fill="#63636b">Ask a research question. Two AI agents review high-impact</text>
+  <text x="48" y="169" font-size="16" fill="#63636b">scientific literature and write you a grounded summary.</text>
+  <text x="48" y="216" font-size="14" font-weight="700" fill="#1a1a1e">Research question</text>
+  <rect x="48" y="230" width="864" height="96" rx="10" fill="#ffffff" stroke="#e2e2e6"/>
+  <text x="66" y="274" font-size="17" fill="#9a9aa4">e.g. Does intermittent fasting improve insulin sensitivity in adults?</text>
+  <text x="48" y="350" font-size="13" fill="#63636b">A focused, answerable question works best. Max 500 characters.</text>
+  <rect x="48" y="376" width="222" height="48" rx="10" fill="#3b5bdb"/>
+  <text x="159" y="405" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">Run literature review</text>
+</svg>
