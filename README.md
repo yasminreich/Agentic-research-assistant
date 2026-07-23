@@ -1,94 +1,91 @@
-# Automated Research Assistant
+# Research Assistant
 
-A backend service that answers a research question by automatically reviewing the
-scientific literature with a multi-agent system.
-
-- **Researcher Agent** (Claude, via AG2 `AssistantAgent`) — plans search queries,
-  judges relevance, clusters papers that reach the same conclusion, and writes a
-  comprehensive scientific summary.
-- **Proxy Agent** (AG2 `UserProxyAgent`) — executes the actual API calls to the
-  **Paperclip** database (our codename for [OpenAlex](https://docs.openalex.org/),
-  which is free and needs no API key).
-
-The system targets **high-impact, reputable journals**, **deduplicates by
-recency** (when several papers reach the same conclusion, the most recent wins),
-and **saves** the summary plus all selected papers to disk.
-
-## What it looks like
+Ask a research question in your browser and get a clear, cited summary of the
+scientific literature — written by AI agents that search real papers and focus on
+high-impact journals.
 
 ![The Research Assistant web page — type a question, then read the summary and papers.](docs/screenshots/landing.svg)
 
-## How it works
+## Quick start
 
-```
-POST /research {question}
-   → Researcher plans queries
-   → Proxy calls Paperclip (OpenAlex)
-        → results filtered to a curated high-impact journal allowlist
-        → near-duplicate papers collapsed, most recent kept
-   → Researcher judges relevance + writes scientific summary
-   → Proxy saves report  → output/<timestamp>-<slug>.json + .md
-```
-
-Deterministic steps (API calls, the high-impact allowlist, title-level dedup +
-recency) live in plain Python so they're auditable. Semantic steps (relevance,
-"same conclusion") are the Researcher's judgment.
-
-## Setup
-
-Requires Python 3.10+.
-
-**1. Install dependencies:**
+You need **Python 3.10+** and an **Anthropic API key** (from
+[console.anthropic.com](https://console.anthropic.com/)). Paper search uses
+[OpenAlex](https://openalex.org/), which is free and needs no key.
 
 ```bash
+# 1. Install the dependencies
 pip install -r requirements.txt
+
+# 2. Add your API key
+cp .env.example .env          # Windows PowerShell: Copy-Item .env.example .env
+# then open .env and set:  ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. Start it
+python run.py
 ```
 
-**2. Create your configuration file.** The repo does **not** ship a `.env` file —
-it's gitignored so secrets never get committed. You must create your own by
-copying the template `.env.example` (which *is* in the repo):
+Now open **http://localhost:8000**, type a question, and click **Run literature
+review**. A run takes about 1–2 minutes. That's it. 🎉
 
-```bash
-cp .env.example .env      # macOS/Linux/Git Bash
-# Windows PowerShell:  Copy-Item .env.example .env
+Each run also saves a full report (summary + every paper) to the `output/` folder
+as JSON and Markdown.
+
+## Share it with others
+
+Want other people to try it from a link — no install, no key on their end? Deploy
+it once and share the URL. It runs on **your** API key, so cap your spending first.
+
+1. **Set a spend limit** at [console.anthropic.com](https://console.anthropic.com/)
+   → Settings → Limits (e.g. $15/month). This is your safety net — a run costs
+   roughly **$0.15–$1.00**.
+2. **Deploy to [Render](https://render.com/)** (free tier): sign in with GitHub →
+   **New + → Blueprint** → pick this repo → set `ANTHROPIC_API_KEY` → **Apply**.
+   You get a public URL in a few minutes. (The included `Dockerfile` and
+   `render.yaml` do the setup; Railway and Fly.io work the same way.)
+3. **Share the URL.** Optionally set `ACCESS_PASSWORD` so only people you give the
+   password to can use it.
+
+## Common settings
+
+Everything is configured in `.env` (see `.env.example`). The only **required**
+value is `ANTHROPIC_API_KEY`. The handy optional ones:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `ACCESS_PASSWORD` | *(blank)* | Password for the web page. Blank = anyone with the link can use it. |
+| `MAX_RUNS_PER_DAY` | `50` | Daily cap on runs — bounds your cost. |
+| `MIN_YEAR` | `2015` | Ignore papers older than this year. |
+| `MAX_PAPERS_PER_QUERY` | `50` | Papers fetched per search. |
+
+---
+
+<details>
+<summary><b>How it works & advanced details</b></summary>
+
+### How it works
+
+```
+You ask a question
+   → Researcher agent (Claude) plans a few search queries
+   → Proxy agent searches OpenAlex for real papers
+        → results filtered to a curated high-impact journal list
+        → near-duplicate papers collapsed, most recent kept
+   → Researcher judges relevance and writes a cited summary
+   → the report is saved to output/<timestamp>-<slug>.json + .md
 ```
 
-Then open `.env` and set your Anthropic key:
+Two agents (built on the AG2 / AutoGen framework) do the work: a **Researcher**
+(Claude `claude-opus-4-8`) that plans and writes, and a **Proxy** that runs the
+searches. The deterministic parts (searching, the journal allowlist, deduplication)
+are plain Python so they're auditable; the judgment calls (relevance, "same
+conclusion") are the Researcher's.
 
-```
-ANTHROPIC_API_KEY=sk-ant-...
-```
+The paper source is codenamed **Paperclip** in the code — it's just OpenAlex behind
+`app/paperclip_client.py`.
 
-That's the only **required** value. The literature backend (OpenAlex) needs
-**no API key**. Optionally set `OPENALEX_MAILTO` to your email for OpenAlex's
-faster "polite pool". If `.env` is missing or `ANTHROPIC_API_KEY` is blank, the
-server returns a clear `503` error when you make a request.
+### Use it from the API instead of the browser
 
-> Note: your research **question is not stored in any config file** — you pass it
-> in the request itself (see below). `.env` only holds settings/credentials.
-
-## Run
-
-The app is a server you leave running, plus a request you send to it. **You need
-two terminals** (both with this project's environment / virtualenv active).
-
-**Terminal 1 — start the server and leave it running:**
-
-```bash
-python run.py            # serves on http://0.0.0.0:8000 — keep this open
-```
-
-You'll see uvicorn startup logs. Leave this terminal running; it processes each
-research request and prints progress. (Stop it later with `Ctrl+C`.)
-
-> **Easiest way: use the browser.** Open **http://localhost:8000** and you get a
-> web page — type a question, hit *Run literature review*, and read the summary
-> and papers directly. No second terminal or `curl` needed. If `ACCESS_PASSWORD`
-> is set (see below), the page asks for it once. The `curl` flow below is the
-> equivalent API call if you'd rather script it.
-
-**Terminal 2 — send your research question.** The question goes in the `question`
-field of the JSON body — **replace the example text with your own question:**
+The web page is a front end for one endpoint. You can call it directly:
 
 ```bash
 curl -X POST http://localhost:8000/research \
@@ -96,136 +93,74 @@ curl -X POST http://localhost:8000/research \
   -d '{"question": "Does intermittent fasting improve insulin sensitivity in adults?"}'
 ```
 
-> On **Windows PowerShell**, `curl` is an alias for `Invoke-WebRequest` and the
-> single-quote/JSON escaping differs. Use this instead:
->
-> ```powershell
-> Invoke-RestMethod -Uri http://localhost:8000/research -Method Post `
->   -ContentType "application/json" `
->   -Body '{"question": "Does intermittent fasting improve insulin sensitivity in adults?"}'
-> ```
+On Windows PowerShell use `Invoke-RestMethod`:
 
-A run takes roughly 1–2 minutes (the agents make several LLM + search
-round-trips). When it finishes, Terminal 2 prints the response:
-
-```json
-{
-  "question": "...",
-  "summary": "...",
-  "paper_count": 6,
-  "saved": true,
-  "json_path": "output/20260629-...-does-intermittent-fasting.json",
-  "markdown_path": "output/20260629-...-does-intermittent-fasting.md"
-}
+```powershell
+Invoke-RestMethod -Uri http://localhost:8000/research -Method Post `
+  -ContentType "application/json" `
+  -Body '{"question": "Does intermittent fasting improve insulin sensitivity in adults?"}'
 ```
 
-The full report (summary + every selected paper with authors, journal, year,
-citations, DOI) is written to the `output/` directory in both JSON and Markdown
-at the paths shown in the response.
+The response includes the summary, paper count, and the saved file paths.
 
-## Smoke test before a full run
+### Check your setup
 
 ```bash
 python -m scripts.smoke_test
 ```
 
-This checks the Paperclip search path (no key needed) and — if
-`ANTHROPIC_API_KEY` is set — a single Claude call through AG2.
+Confirms the OpenAlex search works (no key needed) and — if `ANTHROPIC_API_KEY` is
+set — that a single Claude call succeeds.
 
-## Configuration
-
-All settings come from environment variables / `.env` (see `.env.example`):
+### All settings
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | **Required.** Claude access for the Researcher. |
-| `OPENALEX_MAILTO` | — | Optional; your email for OpenAlex's faster polite pool. |
+| `OPENALEX_MAILTO` | — | Optional; your email for OpenAlex's faster "polite pool". |
 | `CLAUDE_MODEL` | `claude-opus-4-8` | Model for the Researcher. |
 | `MIN_YEAR` | `2015` | Earliest publication year considered. |
 | `MAX_PAPERS_PER_QUERY` | `50` | Results requested per query (API caps at 200). |
 | `MAX_AGENT_TURNS` | `15` | Safety cap on automatic agent turns per run. |
 | `OUTPUT_DIR` | `output` | Where reports are written. |
-| `ACCESS_PASSWORD` | — | Shared password required by the web UI. Blank = no gate. **Set it before exposing a public URL.** |
-| `MAX_RUNS_PER_DAY` | `50` | In-app cap on research runs per day (UTC), bounding worst-case cost. |
+| `ACCESS_PASSWORD` | — | Shared password for the web UI. Blank = no gate. |
+| `MAX_RUNS_PER_DAY` | `50` | In-app cap on runs per day (UTC). |
 | `MAX_QUESTION_CHARS` | `500` | Reject questions longer than this. |
 
-## Deploy & share (public link for testers)
+### Change which journals count as "high-impact"
 
-To let non-technical people test the tool from a browser — no install, no key on
-their end — deploy it once and share the URL. It runs on **your** Anthropic key,
-so set up the spending guardrails below first.
+Edit the allowlist in [`app/journals.py`](app/journals.py) — `HIGH_IMPACT_JOURNALS`
+(normalized, lowercase) and `ALIASES` (abbreviations). It's the single source of
+truth for that policy.
 
-**1. Cap your spending (do this first).**
-
-- **Hard cap (the real guarantee):** in the
-  [Anthropic Console](https://console.anthropic.com/) set a **monthly spend limit**
-  and an alert email on your workspace (e.g. $30). When spend hits the limit the
-  API stops until next month — no code involved.
-- **In-app backstop:** `ACCESS_PASSWORD` (so only invited testers can spend) and
-  `MAX_RUNS_PER_DAY` (bounds worst-case daily cost). A run costs roughly
-  **$0.15–$1.00** on `claude-opus-4-8`; run one query and check the Console to get
-  your real number.
-
-**2. Deploy to [Render](https://render.com/) (free tier).**
-
-Push this repo to GitHub, then in Render: **New + → Blueprint →** pick the repo
-(it reads [`render.yaml`](render.yaml)). Or **New + → Web Service → Docker** using
-the included [`Dockerfile`](Dockerfile). In the dashboard, set the secrets:
-
-- `ANTHROPIC_API_KEY` — your key
-- `ACCESS_PASSWORD` — the password you'll give testers
-- `OPENALEX_MAILTO` *(optional)*, `MAX_RUNS_PER_DAY` *(optional)*
-
-Render injects `$PORT`, which `run.py` already honors. The free tier **sleeps when
-idle**, so the first request after a nap is slow (upgrade to a paid instance for
-always-on). Railway and Fly.io work the same way with the same `Dockerfile`.
-
-**3. Share the URL** and the access password with your testers. That's it.
-
-Run it as a container locally to check the image first:
-
-```bash
-docker build -t research-assistant .
-docker run -p 8000:8000 --env-file .env research-assistant
-# open http://localhost:8000
-```
-
-## Editing the high-impact journal policy
-
-The reputable-journal allowlist is the single source of truth in
-[`app/journals.py`](app/journals.py). Add or remove entries in
-`HIGH_IMPACT_JOURNALS` (normalized, lowercase) and `ALIASES` (abbreviations).
-
-## Project layout
+### Project layout
 
 ```
 app/
   config.py            # settings (pydantic-settings)
-  paperclip_client.py  # PaperclipClient → OpenAlex Works API
+  paperclip_client.py  # OpenAlex Works API client
   journals.py          # high-impact journal allowlist + matcher
   filters.py           # high-impact filter + recency dedup
-  tools.py             # search_literature / save_research_report tools
-  agents.py            # Researcher + Proxy agents, Anthropic llm_config
+  tools.py             # search / save tools the agents call
+  agents.py            # Researcher + Proxy agents
   workflow.py          # run_research() orchestration
   persistence.py       # JSON + Markdown report writer
   server.py            # FastAPI app: web page + /research + /health
   limits.py            # in-memory per-day run cap
-  static/index.html    # tester-facing web UI (served at /)
+  static/index.html    # the web page (served at /)
 scripts/smoke_test.py  # pre-flight checks
-run.py                 # uvicorn launcher
-Dockerfile             # container image for Render/Railway/Fly
-render.yaml            # Render blueprint (secrets set in dashboard)
+run.py                 # launcher
+Dockerfile, render.yaml  # deployment
 ```
 
-## Troubleshooting
+### Troubleshooting
 
-**`400` error about `temperature` / `top_p` from Claude.** Opus 4.8 (and other
-4.7+/Fable models) reject sampling parameters, and AG2 sends `temperature` by
-default. This is handled automatically by `app/anthropic_compat.py`, which strips
-those params for affected models. If you somehow still hit it, set
-`CLAUDE_MODEL=claude-sonnet-4-6` in `.env` (Sonnet 4.6 accepts `temperature`).
-Run `python -m scripts.smoke_test` to confirm the LLM path before the server.
+**`400` error about `temperature` from Claude.** Opus 4.8 rejects sampling
+parameters, which AG2 sends by default. This is handled automatically by
+`app/anthropic_compat.py`. Run `python -m scripts.smoke_test` to confirm the LLM
+path.
 
-**OpenAlex `429`s.** OpenAlex is keyless with generous limits, but under heavy
-use it can still rate-limit. The client backs off and retries automatically;
-setting `OPENALEX_MAILTO` to your email moves you into the faster polite pool.
+**OpenAlex `429` (rate limit).** Rare; the client retries automatically. Setting
+`OPENALEX_MAILTO` to your email moves you into OpenAlex's faster pool.
+
+</details>
