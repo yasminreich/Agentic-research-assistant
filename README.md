@@ -77,6 +77,12 @@ python run.py            # serves on http://0.0.0.0:8000 — keep this open
 You'll see uvicorn startup logs. Leave this terminal running; it processes each
 research request and prints progress. (Stop it later with `Ctrl+C`.)
 
+> **Easiest way: use the browser.** Open **http://localhost:8000** and you get a
+> web page — type a question, hit *Run literature review*, and read the summary
+> and papers directly. No second terminal or `curl` needed. If `ACCESS_PASSWORD`
+> is set (see below), the page asks for it once. The `curl` flow below is the
+> equivalent API call if you'd rather script it.
+
 **Terminal 2 — send your research question.** The question goes in the `question`
 field of the JSON body — **replace the example text with your own question:**
 
@@ -135,6 +141,50 @@ All settings come from environment variables / `.env` (see `.env.example`):
 | `MAX_PAPERS_PER_QUERY` | `50` | Results requested per query (API caps at 200). |
 | `MAX_AGENT_TURNS` | `15` | Safety cap on automatic agent turns per run. |
 | `OUTPUT_DIR` | `output` | Where reports are written. |
+| `ACCESS_PASSWORD` | — | Shared password required by the web UI. Blank = no gate. **Set it before exposing a public URL.** |
+| `MAX_RUNS_PER_DAY` | `50` | In-app cap on research runs per day (UTC), bounding worst-case cost. |
+| `MAX_QUESTION_CHARS` | `500` | Reject questions longer than this. |
+
+## Deploy & share (public link for testers)
+
+To let non-technical people test the tool from a browser — no install, no key on
+their end — deploy it once and share the URL. It runs on **your** Anthropic key,
+so set up the spending guardrails below first.
+
+**1. Cap your spending (do this first).**
+
+- **Hard cap (the real guarantee):** in the
+  [Anthropic Console](https://console.anthropic.com/) set a **monthly spend limit**
+  and an alert email on your workspace (e.g. $30). When spend hits the limit the
+  API stops until next month — no code involved.
+- **In-app backstop:** `ACCESS_PASSWORD` (so only invited testers can spend) and
+  `MAX_RUNS_PER_DAY` (bounds worst-case daily cost). A run costs roughly
+  **$0.15–$1.00** on `claude-opus-4-8`; run one query and check the Console to get
+  your real number.
+
+**2. Deploy to [Render](https://render.com/) (free tier).**
+
+Push this repo to GitHub, then in Render: **New + → Blueprint →** pick the repo
+(it reads [`render.yaml`](render.yaml)). Or **New + → Web Service → Docker** using
+the included [`Dockerfile`](Dockerfile). In the dashboard, set the secrets:
+
+- `ANTHROPIC_API_KEY` — your key
+- `ACCESS_PASSWORD` — the password you'll give testers
+- `OPENALEX_MAILTO` *(optional)*, `MAX_RUNS_PER_DAY` *(optional)*
+
+Render injects `$PORT`, which `run.py` already honors. The free tier **sleeps when
+idle**, so the first request after a nap is slow (upgrade to a paid instance for
+always-on). Railway and Fly.io work the same way with the same `Dockerfile`.
+
+**3. Share the URL** and the access password with your testers. That's it.
+
+Run it as a container locally to check the image first:
+
+```bash
+docker build -t research-assistant .
+docker run -p 8000:8000 --env-file .env research-assistant
+# open http://localhost:8000
+```
 
 ## Editing the high-impact journal policy
 
@@ -154,9 +204,13 @@ app/
   agents.py            # Researcher + Proxy agents, Anthropic llm_config
   workflow.py          # run_research() orchestration
   persistence.py       # JSON + Markdown report writer
-  server.py            # FastAPI app
+  server.py            # FastAPI app: web page + /research + /health
+  limits.py            # in-memory per-day run cap
+  static/index.html    # tester-facing web UI (served at /)
 scripts/smoke_test.py  # pre-flight checks
 run.py                 # uvicorn launcher
+Dockerfile             # container image for Render/Railway/Fly
+render.yaml            # Render blueprint (secrets set in dashboard)
 ```
 
 ## Troubleshooting

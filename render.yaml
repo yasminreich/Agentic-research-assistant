@@ -1,0 +1,17 @@
+# Render blueprint. Push this repo to GitHub, then in Render:
+#   New +  →  Blueprint  →  pick this repo.
+# Set the secret values (marked sync: false) in the Render dashboard afterward.
+services:
+  - type: web
+    name: research-assistant
+    runtime: docker
+    plan: free            # free tier sleeps when idle; first request after a nap is slow
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false        # set in the dashboard — never commit the key
+      - key: ACCESS_PASSWORD
+        sync: false        # shared password you give to testers
+      - key: OPENALEX_MAILTO
+        sync: false        # optional: your email for OpenAlex's faster pool
+      - key: MAX_RUNS_PER_DAY
+        value: "50"        # in-app daily cap; the hard cap is the Console spend limit
