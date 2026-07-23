@@ -6,6 +6,36 @@ high-impact journals.
 
 ![The Research Assistant web page — type a question, then read the summary and papers.](docs/screenshots/landing.svg)
 
+## How it works
+
+Two AI agents (built on the AG2 / AutoGen framework) work together on each question:
+
+- **Researcher agent** — powered by Claude (`claude-opus-4-8`). It plans a few
+  search queries, judges which returned papers are actually relevant, groups papers
+  that reach the same conclusion (keeping the most recent), and writes the final
+  cited summary.
+- **Proxy agent** — runs the searches the Researcher asks for, against
+  **OpenAlex**, a free open database of scientific papers (codenamed "Paperclip" in
+  the code).
+
+Results are filtered to a curated list of **high-impact journals**, **deduplicated
+by recency** (when several papers agree, the most recent one wins), and saved to the
+`output/` folder as JSON and Markdown.
+
+```
+You ask a question
+   → Researcher plans a few search queries
+   → Proxy searches OpenAlex for real papers
+        → filtered to a curated high-impact journal list
+        → near-duplicate papers collapsed, most recent kept
+   → Researcher judges relevance and writes a cited summary
+   → the report is saved to output/<timestamp>-<slug>.json + .md
+```
+
+The deterministic parts (searching, the journal allowlist, deduplication) are plain
+Python so they're auditable; the judgment calls (relevance, "same conclusion") are
+the Researcher's.
+
 ## Quick start
 
 You need **Python 3.10+** and an **Anthropic API key** (from
@@ -60,28 +90,7 @@ value is `ANTHROPIC_API_KEY`. The handy optional ones:
 ---
 
 <details>
-<summary><b>How it works & advanced details</b></summary>
-
-### How it works
-
-```
-You ask a question
-   → Researcher agent (Claude) plans a few search queries
-   → Proxy agent searches OpenAlex for real papers
-        → results filtered to a curated high-impact journal list
-        → near-duplicate papers collapsed, most recent kept
-   → Researcher judges relevance and writes a cited summary
-   → the report is saved to output/<timestamp>-<slug>.json + .md
-```
-
-Two agents (built on the AG2 / AutoGen framework) do the work: a **Researcher**
-(Claude `claude-opus-4-8`) that plans and writes, and a **Proxy** that runs the
-searches. The deterministic parts (searching, the journal allowlist, deduplication)
-are plain Python so they're auditable; the judgment calls (relevance, "same
-conclusion") are the Researcher's.
-
-The paper source is codenamed **Paperclip** in the code — it's just OpenAlex behind
-`app/paperclip_client.py`.
+<summary><b>Advanced details</b></summary>
 
 ### Use it from the API instead of the browser
 
