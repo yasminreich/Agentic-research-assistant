@@ -131,7 +131,7 @@
           placeholder="e.g. Does intermittent fasting improve insulin sensitivity in adults?"></textarea>
         <div class="hint">A focused, answerable question works best. Max 500 characters.</div>
       </div>
-      <div class="row" id="pw-row">
+      <div class="row" id="pw-row" style="display:none">
         <label for="password">Access password</label>
         <input type="password" id="password" placeholder="Password given to you by the owner" />
         <div class="hint">Entered once, then remembered on this device.</div>
@@ -158,6 +158,12 @@
 
     // Remember the password on this device so testers enter it only once.
     passwordEl.value = localStorage.getItem("ra_password") || "";
+
+    // Only show the password field if the server actually requires one.
+    fetch("/config")
+      .then(r => r.json())
+      .then(c => { if (c.password_required) document.getElementById("pw-row").style.display = ""; })
+      .catch(() => {});
 
     function escapeHtml(s) {
       return (s || "").replace(/[&<>"']/g, c => (

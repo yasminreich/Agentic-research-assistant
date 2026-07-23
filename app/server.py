@@ -53,6 +53,13 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/config")
+def config() -> dict:
+    """UI hints. `password_required` lets the page hide the password field when
+    no `ACCESS_PASSWORD` is configured."""
+    return {"password_required": bool(get_settings().access_password)}
+
+
 @app.post("/research", response_model=ResearchResponse)
 def research(
     request: ResearchRequest,
