@@ -14,6 +14,7 @@ from autogen import AssistantAgent, UserProxyAgent, register_function
 
 from .anthropic_compat import patch_ag2_anthropic_sampling
 from .config import Settings, get_settings
+from .journals import DEFAULT_POLICY, JournalPolicy
 from .tools import ResearchTools
 
 # Ensure AG2 doesn't send sampling params that Opus 4.7/4.8/Fable reject.
@@ -21,7 +22,7 @@ patch_ag2_anthropic_sampling()
 
 TERMINATION_TOKEN = "TERMINATE"
 
-RESEARCHER_SYSTEM_PROMPT = f"""\
+RESEARCHER_SYSTEM_PROMPT_TEMPLATE = f"""\
 You are a meticulous research scientist conducting an automated literature review.
 
 You have access to two tools, executed for you by a proxy:
@@ -29,6 +30,11 @@ You have access to two tools, executed for you by a proxy:
     that has ALREADY been filtered to high-impact, reputable journals and
     deduplicated so that only the most recent paper survives among near-identical
     works. It returns curated candidate papers with their `paper_id`.
+    This run's journal coverage is: {{journal_scope}}. Papers outside it are
+    dropped before you see them, so if a search comes back empty the venue
+    filter is the likely cause, not an absence of literature — say so in your
+    summary rather than inventing sources.
+    Only papers published in {{min_year}} or later are considered.
   - `save_research_report(summary, paper_ids, question)`: saves your final
     scientific summary and the selected papers to disk.
 
@@ -55,12 +61,25 @@ only what the tools return.
 """
 
 
-def build_team(question: str, settings: Settings | None = None):
+def build_team(
+    question: str,
+    settings: Settings | None = None,
+    *,
+    policy: JournalPolicy = DEFAULT_POLICY,
+    min_year: int | None = None,
+):
     """Create the Researcher + Proxy agents wired to a fresh tool set.
+
+    Args:
+        question: The research question this run answers.
+        settings: Runtime settings; defaults to the cached global ones.
+        policy: Which journals this run accepts. Defaults to every field.
+        min_year: Earliest publication year; defaults to `settings.min_year`.
 
     Returns `(researcher, proxy, tools)`.
     """
     settings = settings or get_settings()
+    effective_min_year = min_year if min_year is not None else settings.min_year
 
     llm_config = {
         "config_list": [
@@ -77,7 +96,9 @@ def build_team(question: str, settings: Settings | None = None):
 
     researcher = AssistantAgent(
         name="Researcher",
-        system_message=RESEARCHER_SYSTEM_PROMPT,
+        system_message=RESEARCHER_SYSTEM_PROMPT_TEMPLATE.format(
+            journal_scope=policy.describe(), min_year=effective_min_year
+        ),
         llm_config=llm_config,
     )
 
@@ -90,7 +111,12 @@ def build_team(question: str, settings: Settings | None = None):
         default_auto_reply="",
     )
 
-    tools = ResearchTools(question=question, settings=settings)
+    tools = ResearchTools(
+        question=question,
+        settings=settings,
+        policy=policy,
+        min_year=effective_min_year,
+    )
 
     # AG2's register_function only accepts plain functions (not bound methods),
     # and derives each tool's JSON schema from the wrapper's annotated signature.

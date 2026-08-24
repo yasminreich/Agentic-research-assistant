@@ -7,10 +7,13 @@ between a public URL and the owner's Anthropic bill.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app import server
+from app.journals import JOURNALS_BY_FIELD, UnknownFieldError
 from app.limits import DailyRunLimiter
 from app.workflow import ConfigurationError
 
@@ -19,6 +22,7 @@ RESULT = {
     "summary": "It depends.",
     "paper_count": 2,
     "papers": [{"title": "A"}, {"title": "B"}],
+    "rejected_journals": [],
     "json_path": "output/x.json",
     "markdown_path": "output/x.md",
     "saved": True,
@@ -183,6 +187,7 @@ class TestResponseShape:
             "paper_count",
             "saved",
             "papers",
+            "rejected_journals",
             "json_path",
             "markdown_path",
         }
@@ -206,3 +211,136 @@ def _settings(**overrides):
         "max_runs_per_day": 50,
     }
     return Settings(**{**base, **overrides})
+
+
+class TestJournalsEndpoint:
+    def test_lists_every_field_with_a_label_and_count(self, client):
+        body = client.get("/journals").json()
+        keys = {f["key"] for f in body["fields"]}
+        assert keys == set(JOURNALS_BY_FIELD)
+        for entry in body["fields"]:
+            assert entry["label"]
+            assert entry["count"] == len(JOURNALS_BY_FIELD[entry["key"]])
+            assert len(entry["examples"]) <= 3
+
+    def test_reports_the_total_journal_count(self, client):
+        body = client.get("/journals").json()
+        assert body["total_journals"] == len(set().union(*JOURNALS_BY_FIELD.values()))
+
+    def test_fields_are_sorted_by_label_for_stable_rendering(self, client):
+        labels = [f["label"] for f in client.get("/journals").json()["fields"]]
+        assert labels == sorted(labels)
+
+
+class TestConfigHints:
+    def test_exposes_the_limits_the_page_would_otherwise_hardcode(self, client, monkeypatch):
+        monkeypatch.setattr(
+            server, "get_settings", lambda: _settings(min_year=2019, max_question_chars=300)
+        )
+        body = client.get("/config").json()
+        assert body["min_year"] == 2019
+        assert body["max_question_chars"] == 300
+        assert body["earliest_year"] == server.EARLIEST_YEAR
+
+
+class TestJournalSelection:
+    def test_fields_and_min_year_reach_the_run(self, client, stub_run):
+        client.post(
+            "/research",
+            json={
+                "question": "Does colostrum fat matter?",
+                "fields": ["agriculture_food"],
+                "min_year": 2018,
+            },
+        )
+        kwargs = stub_run[0][1]
+        assert kwargs["fields"] == ["agriculture_food"]
+        assert kwargs["min_year"] == 2018
+
+    def test_extra_journals_are_trimmed_and_passed_through(self, client, stub_run):
+        client.post(
+            "/research",
+            json={
+                "question": "Does colostrum fat matter?",
+                "extra_journals": ["  Poultry Weekly  ", "", "   "],
+            },
+        )
+        assert stub_run[0][1]["extra_journals"] == ["Poultry Weekly"]
+
+    def test_omitting_the_controls_leaves_them_unset(self, client, stub_run):
+        client.post("/research", json={"question": "Does fasting help?"})
+        kwargs = stub_run[0][1]
+        assert kwargs["fields"] is None
+        assert kwargs["min_year"] is None
+
+    def test_an_unknown_field_is_a_422(self, client, monkeypatch):
+        """UnknownFieldError subclasses ValueError, which the handler maps to 422."""
+
+        def _raise(*args, **kwargs):
+            raise UnknownFieldError("Unknown field(s): astrology.")
+
+        monkeypatch.setattr(server, "run_research", _raise)
+        response = client.post(
+            "/research", json={"question": "Does fasting help?", "fields": ["astrology"]}
+        )
+        assert response.status_code == 422
+        assert "astrology" in response.json()["detail"]
+
+
+class TestJournalControlValidation:
+    @pytest.mark.parametrize("year", [1899, 3000])
+    def test_an_out_of_range_min_year_is_rejected(self, client, stub_run, year):
+        response = client.post(
+            "/research", json={"question": "Does fasting help?", "min_year": year}
+        )
+        assert response.status_code == 422
+        assert "min_year" in response.json()["detail"]
+        assert stub_run == [], "validation must happen before the run starts"
+
+    def test_the_current_year_is_allowed(self, client, stub_run):
+        this_year = datetime.now(timezone.utc).year
+        response = client.post(
+            "/research", json={"question": "Does fasting help?", "min_year": this_year}
+        )
+        assert response.status_code == 200
+
+    def test_too_many_extra_journals_are_rejected(self, client, stub_run):
+        response = client.post(
+            "/research",
+            json={
+                "question": "Does fasting help?",
+                "extra_journals": [f"Journal {i}" for i in range(server.MAX_EXTRA_JOURNALS + 1)],
+            },
+        )
+        assert response.status_code == 422
+        assert stub_run == []
+
+    def test_an_over_long_journal_name_is_rejected(self, client, stub_run):
+        response = client.post(
+            "/research",
+            json={
+                "question": "Does fasting help?",
+                "extra_journals": ["x" * (server.MAX_JOURNAL_NAME_CHARS + 1)],
+            },
+        )
+        assert response.status_code == 422
+        assert stub_run == []
+
+    def test_a_rejected_request_does_not_consume_a_run_slot(self, client, monkeypatch):
+        limiter = DailyRunLimiter(max_per_day=1)
+        monkeypatch.setattr(server, "_run_limiter", limiter)
+        client.post("/research", json={"question": "Does fasting help?", "min_year": 1500})
+        assert limiter.remaining == 1
+
+
+class TestRejectedJournalsInTheResponse:
+    def test_exclusions_are_returned_to_the_caller(self, client, monkeypatch):
+        rejected = [{"journal": "Journal of Dairy Science", "count": 7}]
+        empty = dict(RESULT, papers=[], paper_count=0, saved=False, rejected_journals=rejected)
+        monkeypatch.setattr(server, "run_research", lambda *a, **k: empty)
+        body = client.post("/research", json={"question": "Does colostrum fat matter?"}).json()
+        assert body["rejected_journals"] == rejected
+
+    def test_defaults_to_an_empty_list(self, client, stub_run):
+        body = client.post("/research", json={"question": "Does fasting help?"}).json()
+        assert body["rejected_journals"] == []

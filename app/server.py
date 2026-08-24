@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .config import get_settings
+from .journals import FIELD_LABELS, JOURNALS_BY_FIELD
 from .limits import DailyRunLimiter
 from .workflow import ConfigurationError, run_research
 
@@ -28,8 +30,30 @@ _settings = get_settings()
 _run_limiter = DailyRunLimiter(_settings.max_runs_per_day)
 
 
+# Guardrails on the per-run journal controls. A caller cannot make the search
+# unboundedly expensive or ask for papers from the future.
+MAX_EXTRA_JOURNALS = 50
+MAX_JOURNAL_NAME_CHARS = 200
+EARLIEST_YEAR = 1900
+
+
 class ResearchRequest(BaseModel):
     question: str = Field(..., min_length=3, description="The research question to answer.")
+    fields: list[str] | None = Field(
+        default=None,
+        description=(
+            "Journal field keys to search (see GET /journals). "
+            "Omit or leave empty to search every field."
+        ),
+    )
+    extra_journals: list[str] | None = Field(
+        default=None,
+        description="Additional journal titles to accept, on top of `fields`.",
+    )
+    min_year: int | None = Field(
+        default=None,
+        description="Earliest publication year. Defaults to the configured MIN_YEAR.",
+    )
 
 
 class ResearchResponse(BaseModel):
@@ -38,6 +62,9 @@ class ResearchResponse(BaseModel):
     paper_count: int
     saved: bool
     papers: list[dict] = []
+    # Journals the run's filter turned away, most frequent first. Lets the UI
+    # explain an empty result instead of just showing nothing.
+    rejected_journals: list[dict] = []
     json_path: str | None = None
     markdown_path: str | None = None
 
@@ -55,9 +82,37 @@ def health() -> dict:
 
 @app.get("/config")
 def config() -> dict:
-    """UI hints. `password_required` lets the page hide the password field when
-    no `ACCESS_PASSWORD` is configured."""
-    return {"password_required": bool(get_settings().access_password)}
+    """UI hints, so the page does not hardcode server-side limits."""
+    settings = get_settings()
+    return {
+        "password_required": bool(settings.access_password),
+        "min_year": settings.min_year,
+        "max_question_chars": settings.max_question_chars,
+        "earliest_year": EARLIEST_YEAR,
+    }
+
+
+@app.get("/journals")
+def journals() -> dict:
+    """The journal fields a caller can choose from.
+
+    The web page renders its checkboxes from this, so the field list lives in
+    `app/journals.py` only and the UI never carries a stale copy.
+    """
+    return {
+        "fields": [
+            {
+                "key": key,
+                "label": FIELD_LABELS.get(key, key),
+                "count": len(journals_in_field),
+                "examples": sorted(journals_in_field)[:3],
+            }
+            for key, journals_in_field in sorted(
+                JOURNALS_BY_FIELD.items(), key=lambda kv: FIELD_LABELS.get(kv[0], kv[0])
+            )
+        ],
+        "total_journals": len(set().union(*JOURNALS_BY_FIELD.values())),
+    }
 
 
 @app.post("/research", response_model=ResearchResponse)
@@ -84,7 +139,30 @@ def research(
             detail=f"Question is too long (max {settings.max_question_chars} characters).",
         )
 
-    # 3. Daily run cap (bounds worst-case cost). Reserve a slot up front and give
+    # 3. Journal / year controls. Validated here so a bad request is rejected
+    #    before it can reserve a run slot or reach the API.
+    min_year = request.min_year
+    if min_year is not None:
+        this_year = datetime.now(timezone.utc).year
+        if not EARLIEST_YEAR <= min_year <= this_year:
+            raise HTTPException(
+                status_code=422,
+                detail=f"min_year must be between {EARLIEST_YEAR} and {this_year}.",
+            )
+
+    extra_journals = [j.strip() for j in (request.extra_journals or []) if j.strip()]
+    if len(extra_journals) > MAX_EXTRA_JOURNALS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"At most {MAX_EXTRA_JOURNALS} extra journals may be supplied.",
+        )
+    if any(len(j) > MAX_JOURNAL_NAME_CHARS for j in extra_journals):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Journal names must be at most {MAX_JOURNAL_NAME_CHARS} characters.",
+        )
+
+    # 4. Daily run cap (bounds worst-case cost). Reserve a slot up front and give
     #    it back if the run fails so crashes don't count against the cap.
     if not _run_limiter.try_acquire():
         raise HTTPException(
@@ -93,7 +171,12 @@ def research(
         )
 
     try:
-        result = run_research(question)
+        result = run_research(
+            question,
+            fields=request.fields,
+            extra_journals=extra_journals,
+            min_year=min_year,
+        )
     except ConfigurationError as exc:
         _run_limiter.release()
         raise HTTPException(status_code=503, detail=str(exc)) from exc

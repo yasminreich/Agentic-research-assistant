@@ -3,7 +3,8 @@
 Two reproducible steps applied to raw Paperclip results before they reach the
 Researcher Agent:
 
-1. `filter_high_impact` — keep only papers from allowlisted journals.
+1. `filter_high_impact` — keep only papers from journals the run's
+   `JournalPolicy` allows.
 2. `deduplicate_by_recency` — collapse near-duplicate papers (same work, or
    near-identical titles) and keep the most recent one.
 
@@ -15,18 +16,42 @@ the recency rule.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from difflib import SequenceMatcher
 
-from .journals import is_high_impact
+from .journals import DEFAULT_POLICY, JournalPolicy
 from .paperclip_client import Paper
 
 # Two titles with a similarity ratio at/above this are treated as the same work.
 TITLE_SIMILARITY_THRESHOLD = 0.92
 
 
-def filter_high_impact(papers: list[Paper]) -> list[Paper]:
-    """Keep only papers whose journal is on the curated allowlist."""
-    return [p for p in papers if is_high_impact(p.journal_name)]
+def filter_high_impact(papers: list[Paper], policy: JournalPolicy = DEFAULT_POLICY) -> list[Paper]:
+    """Keep only papers whose journal the policy allows.
+
+    Defaults to `DEFAULT_POLICY` (every field), which is the behaviour callers
+    had before policies existed.
+    """
+    return [p for p in papers if policy.allows(p.journal_name)]
+
+
+def rejected_journal_counts(
+    papers: list[Paper],
+    policy: JournalPolicy = DEFAULT_POLICY,
+    limit: int = 10,
+) -> list[dict]:
+    """The journals this policy filtered out, most frequent first.
+
+    Surfaced to the caller so an empty result set can explain itself: the user
+    sees which venues were dropped and can add the ones they trust rather than
+    guessing why nothing came back.
+    """
+    counts = Counter(
+        p.journal_name.strip()
+        for p in papers
+        if p.journal_name and not policy.allows(p.journal_name)
+    )
+    return [{"journal": name, "count": n} for name, n in counts.most_common(limit)]
 
 
 def _normalize_title(title: str) -> str:
