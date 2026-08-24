@@ -46,6 +46,14 @@ MAX_LIMIT = 200
 _DOI_PREFIX = "https://doi.org/"
 
 
+def _is_budget_exhausted(body: str) -> bool:
+    """True if a 429 body says the daily budget is spent rather than "slow down"."""
+    lowered = (body or "").lower()
+    return "insufficient budget" in lowered or (
+        "rate limit exceeded" in lowered and "budget" in lowered
+    )
+
+
 @dataclass
 class Paper:
     """A normalized literature record, decoupled from the upstream API shape."""
@@ -67,6 +75,16 @@ class Paper:
 
 class OpenAlexError(RuntimeError):
     """Raised when the OpenAlex API cannot be reached."""
+
+
+class OpenAlexBudgetExhausted(OpenAlexError):
+    """Raised when the day's free OpenAlex request budget is used up.
+
+    OpenAlex meters usage; a busy day exhausts the free allowance and every
+    request 429s with an "Insufficient budget" body until it resets at midnight
+    UTC. Retrying cannot help, so this is raised immediately rather than after
+    the normal backoff sequence.
+    """
 
 
 class OpenAlexClient:
@@ -149,6 +167,14 @@ class OpenAlexClient:
 
             if response.status_code == 200:
                 return response.json()
+
+            if response.status_code == 429 and _is_budget_exhausted(response.text):
+                # Not transient: nothing recovers this before the daily reset.
+                raise OpenAlexBudgetExhausted(
+                    "OpenAlex's free daily request budget is exhausted; it resets at "
+                    "midnight UTC. Set OPENALEX_MAILTO to use the politer, faster "
+                    "pool, or try again tomorrow."
+                )
 
             if response.status_code == 429 or response.status_code >= 500:
                 last_error = OpenAlexError(
