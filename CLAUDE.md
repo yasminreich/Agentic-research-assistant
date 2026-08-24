@@ -2,38 +2,19 @@
 
 Guidance for Claude Code (and humans) working in this repository.
 
-## What this project is
+**What this project is and how to run it live in [README.md](README.md).** This
+file covers only what a contributor needs that the README doesn't say.
 
-An **automated research assistant**: a FastAPI backend that answers a research
-question by running a two-agent literature review.
+## Architecture in one line
 
-- **Researcher Agent** — `AssistantAgent` powered by Claude (`claude-opus-4-8`),
-  via the AG2 (maintained classic AutoGen) framework. Plans search queries,
-  judges relevance, clusters papers that reach the same conclusion (keeping the
-  most recent), and writes a comprehensive scientific summary.
-- **Proxy Agent** — `UserProxyAgent` that executes the registered tool functions
-  (no human input). It calls the **Paperclip** database — our internal codename
-  for the **OpenAlex** Works API (`api.openalex.org/works`, keyless).
+`POST /research` → `workflow.run_research()` → AG2 chat between a **Researcher**
+(Claude) and a **Proxy** (runs the tools) → `PaperclipClient` hits OpenAlex →
+`filters` applies the journal policy and recency dedup → `persistence` writes
+JSON + Markdown to `output/`.
 
-Results are filtered to a **curated high-impact journal allowlist**,
-**deduplicated by recency**, and saved as JSON + Markdown reports under
-`output/`.
-
-## Request flow
-
-```
-POST /research {question}
-  → workflow.run_research(question)
-     → AG2 chat: Researcher plans queries
-        → Proxy runs search_literature  → PaperclipClient (OpenAlex)
-                                         → filter_high_impact + deduplicate_by_recency
-        → Researcher judges relevance, writes summary
-        → Proxy runs save_research_report → output/<timestamp>-<slug>.{json,md}
-```
-
-**Design split:** deterministic steps (API calls, the allowlist, title-level
-dedup + recency) live in plain Python so they're auditable. Semantic steps
-(relevance, "same conclusion") are the Researcher's judgment.
+**Design split:** deterministic steps (API calls, the allowlist, title-level dedup
++ recency) live in plain Python so they're auditable. Semantic steps (relevance,
+"same conclusion") are the Researcher's judgment. Keep that line where it is.
 
 ## Key files
 
@@ -41,24 +22,17 @@ dedup + recency) live in plain Python so they're auditable. Semantic steps
 |---|---|
 | `app/config.py` | Settings via `pydantic-settings` (reads `.env`). |
 | `app/paperclip_client.py` | `PaperclipClient` → OpenAlex Works API; normalizes to the `Paper` dataclass; backoff/retry. **The data source is isolated here** — swapping APIs means editing only this file (keep `Paper` + `search()` signature stable). |
-| `app/journals.py` | `HIGH_IMPACT_JOURNALS` allowlist + aliases + `is_high_impact()`. **Single source of truth for the reputable-journal policy.** |
-| `app/filters.py` | `filter_high_impact()` and `deduplicate_by_recency()`. |
+| `app/journals.py` | `JOURNALS_BY_FIELD`, `FIELD_LABELS`, `ALIASES`, and `JournalPolicy`. **Single source of truth for the reputable-journal policy.** |
+| `app/filters.py` | `filter_high_impact()`, `deduplicate_by_recency()`, `rejected_journal_counts()`. |
 | `app/tools.py` | `ResearchTools`: `search_literature` / `save_research_report` (per-run shared state). |
-| `app/agents.py` | Builds Researcher + Proxy, registers tools, defines the Anthropic `llm_config` and the Researcher system prompt. |
+| `app/agents.py` | Builds Researcher + Proxy, registers tools, defines the Anthropic `llm_config` and the Researcher system prompt template. |
 | `app/anthropic_compat.py` | **Required shim** — see Conventions. |
-| `app/workflow.py` | `run_research(question)` orchestration. |
+| `app/workflow.py` | `run_research(question, *, fields, extra_journals, min_year)`. |
 | `app/persistence.py` | Writes the JSON + Markdown reports. |
-| `app/server.py` | FastAPI app: `POST /research`, `GET /health`. |
-| `run.py` | uvicorn launcher. |
-| `scripts/smoke_test.py` | Pre-flight checks (OpenAlex search + one Claude call). |
-
-## Setup & run (summary — full details in README.md)
-
-- `.env` is **not** committed (gitignored). Create it from `.env.example` and set
-  `ANTHROPIC_API_KEY`. OpenAlex needs no key; `OPENALEX_MAILTO` is optional.
-- Two terminals: `python run.py` (server) in one; the `POST /research` request in
-  another. The research **question is passed in the request body**, not config.
-- Smoke test before a full run: `python -m scripts.smoke_test`.
+| `app/server.py` | FastAPI app: `POST /research`, `GET /journals`, `GET /config`, `GET /health`. |
+| `app/static/index.html` | The whole web UI — one file, vanilla JS, no build step. |
+| `tests/` | 233 offline tests. No network, no API key. |
+| `scripts/smoke_test.py` | Live pre-flight checks (real OpenAlex search + one real Claude call). |
 
 ## Conventions & gotchas (read before editing)
 
@@ -68,24 +42,50 @@ dedup + recency) live in plain Python so they're auditable. Semantic steps
   `app/anthropic_compat.py` patches AG2's `load_config` to strip those params for
   affected models. **Keep this shim** and keep `patch_ag2_anthropic_sampling()`
   called in `agents.py`. If Claude calls start 400-ing on sampling params, that
-  patch is the place to look.
+  patch is the place to look — and `tests/test_anthropic_compat.py` pins the
+  AG2 internal it depends on, so an upgrade that breaks it fails the build.
 - **Keep the data source behind `PaperclipClient`.** `journals.py`, `filters.py`,
   `tools.py`, `agents.py`, `workflow.py`, `persistence.py` all depend only on the
   `Paper` dataclass — preserve it when changing APIs.
-- **High-impact policy** changes go in `journals.py` only.
+- **High-impact policy** changes go in `journals.py` only. The web UI builds its
+  checkboxes from `GET /journals`, so adding a field there needs no UI change —
+  but it does need an entry in both `JOURNALS_BY_FIELD` and `FIELD_LABELS`
+  (a test enforces that they stay in sync).
+- **Journal matching is exact after normalization, not substring.** `"dairy
+  science"` will never match *Journal of Dairy Science*. Add the full lowercase
+  title, and use `ALIASES` for abbreviations and leading-article variants.
+- **`fields` has three states.** `None` = every field (the controls were never
+  touched). A list = those fields. An **empty list** = no field, so only
+  `extra_journals` applies. Don't collapse the last two.
 - **Secrets:** never commit `.env` or hardcode keys. `.gitignore` covers `.env`,
-  `output/`, and `~$*.docx`. Before any commit or push, scan staged content for
-  `sk-ant-` and confirm `.env` is not tracked.
-- **Verify changes** by running `python -m scripts.smoke_test` (and, for behavior
-  changes, a full `POST /research` run).
+  `output/`, and `project scope.docx`. Before any commit or push, scan staged
+  content for `sk-ant-` and confirm `.env` is not tracked.
 
-## Git workflow — commit regularly
+## Testing
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                                    # offline; safe to run anywhere
+ruff check . && ruff format --check .
+```
+
+CI (`.github/workflows/ci.yml`) runs exactly those on Python 3.10/3.11/3.12.
+
+**Keep the suite offline.** The two injection seams that make that possible are
+`PaperclipClient(session=...)` and `ResearchTools(client=...)` — don't remove
+them. Anything needing a real API call belongs in `scripts/smoke_test.py`, which
+is run by hand.
+
+For behaviour changes, also do a real `POST /research` run before calling it done.
+
+## Git workflow
 
 - **Commit in small, logical increments** as you complete each coherent change,
   rather than batching many unrelated edits into one large commit.
-- Write clear, imperative commit messages (e.g. `docs: ...`, `fix: ...`,
-  `feat: ...`) describing what changed and why.
+- Write clear, imperative commit messages (`docs:`, `fix:`, `feat:`, `test:`,
+  `chore:`) describing what changed and why.
+- **Work on a branch and open a PR** rather than pushing to `main`.
 - **Always scan staged content for secrets before committing**, and re-scan the
   full history before any push (this repo is public).
 - Remote is `origin` → `https://github.com/yasminreich/Agentic-research-assistant`
-  (branch `main`). Push after committing when work is in a working state.
+  (branch `main`).
