@@ -26,9 +26,7 @@ def check_paperclip() -> bool:
     print("== Paperclip (OpenAlex) search check ==")
     client = PaperclipClient()
     try:
-        papers = client.search(
-            "intermittent fasting insulin sensitivity", limit=20, year_from=2015
-        )
+        papers = client.search("intermittent fasting insulin sensitivity", limit=20, year_from=2015)
     except PaperclipError as exc:
         print(f"  FAIL: {exc}")
         return False
