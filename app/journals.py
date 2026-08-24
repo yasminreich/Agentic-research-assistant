@@ -341,8 +341,10 @@ class JournalPolicy:
         """Validate and normalize the inputs into a policy.
 
         Args:
-            fields: Field keys from `JOURNALS_BY_FIELD`. `None` or an empty
-                list means every field.
+            fields: Field keys from `JOURNALS_BY_FIELD`. `None` (the field
+                controls were never touched) means every field. An explicitly
+                empty list means no field at all — the caller unchecked
+                everything, so only `extra_journals` applies.
             extra_journals: Free-text journal titles, normalized the same way
                 incoming paper journal names are so they match on equal terms.
 
@@ -350,7 +352,7 @@ class JournalPolicy:
             UnknownFieldError: if a field key is not in `JOURNALS_BY_FIELD`.
         """
         selected: frozenset[str] | None = None
-        if fields:
+        if fields is not None:
             unknown = sorted(set(fields) - set(JOURNALS_BY_FIELD))
             if unknown:
                 raise UnknownFieldError(
@@ -371,8 +373,11 @@ class JournalPolicy:
         """Every normalized journal name this policy accepts."""
         if self.fields is None:
             base = set(HIGH_IMPACT_JOURNALS)
-        else:
+        elif self.fields:
             base = set().union(*(JOURNALS_BY_FIELD[f] for f in self.fields))
+        else:
+            # Every field was explicitly unchecked; only `extra` applies.
+            base = set()
         return base | set(self.extra)
 
     def allows(self, journal_name: str | None) -> bool:
@@ -384,8 +389,10 @@ class JournalPolicy:
         """A short human-readable summary, used in the Researcher's prompt."""
         if self.fields is None:
             scope = "all fields"
-        else:
+        elif self.fields:
             scope = ", ".join(FIELD_LABELS.get(f, f) for f in sorted(self.fields))
+        else:
+            scope = "no field"
         if self.extra:
             scope += f", plus {len(self.extra)} journal(s) named by the user"
         return scope

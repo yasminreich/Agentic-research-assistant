@@ -326,6 +326,26 @@ class TestJournalControlValidation:
         assert response.status_code == 422
         assert stub_run == []
 
+    def test_no_fields_and_no_extras_is_rejected(self, client, stub_run):
+        """That combination can only ever return nothing — say so up front
+        rather than spending a run to discover it."""
+        response = client.post("/research", json={"question": "Does fasting help?", "fields": []})
+        assert response.status_code == 422
+        assert "No journals selected" in response.json()["detail"]
+        assert stub_run == []
+
+    def test_no_fields_but_named_journals_is_allowed(self, client, stub_run):
+        response = client.post(
+            "/research",
+            json={
+                "question": "Does fasting help?",
+                "fields": [],
+                "extra_journals": ["Poultry Weekly"],
+            },
+        )
+        assert response.status_code == 200
+        assert stub_run[0][1]["fields"] == []
+
     def test_a_rejected_request_does_not_consume_a_run_slot(self, client, monkeypatch):
         limiter = DailyRunLimiter(max_per_day=1)
         monkeypatch.setattr(server, "_run_limiter", limiter)
