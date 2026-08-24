@@ -10,6 +10,7 @@ import json
 
 import pytest
 
+from app.journals import JournalPolicy
 from app.paperclip_client import PaperclipError
 from app.tools import ABSTRACT_PREVIEW_CHARS, ResearchTools
 
@@ -144,3 +145,65 @@ class TestSaveResearchReport:
     def test_last_report_is_none_before_saving(self, tools_for):
         tools, _ = tools_for()
         assert tools.last_report is None
+
+
+class TestJournalPolicyIntegration:
+    def test_a_narrowed_policy_is_applied_to_results(self, make_paper):
+        policy = JournalPolicy.build(fields=["agriculture_food"])
+        papers = [
+            make_paper("Dairy work", journal_name="Journal of Dairy Science"),
+            make_paper("Physics work", journal_name="Nature"),
+        ]
+        tools = ResearchTools(question="Q", client=FakeClient(papers), policy=policy)
+        payload = json.loads(tools.search_literature("q"))
+        assert [p["title"] for p in payload["papers"]] == ["Dairy work"]
+
+    def test_the_policy_is_described_for_the_agent(self, make_paper):
+        policy = JournalPolicy.build(fields=["agriculture_food"])
+        tools = ResearchTools(question="Q", client=FakeClient([]), policy=policy)
+        payload = json.loads(tools.search_literature("q"))
+        assert payload["journal_policy"] == "Agriculture & food science"
+
+    def test_min_year_overrides_the_settings_default(self):
+        client = FakeClient([])
+        tools = ResearchTools(question="Q", client=client, min_year=2021)
+        tools.search_literature("q")
+        assert client.calls[0]["year_from"] == 2021
+
+    def test_an_explicit_year_from_still_wins_over_min_year(self):
+        client = FakeClient([])
+        tools = ResearchTools(question="Q", client=client, min_year=2021)
+        tools.search_literature("q", year_from=2010)
+        assert client.calls[0]["year_from"] == 2010
+
+
+class TestRejectedJournalReporting:
+    def test_excluded_journals_are_reported_in_the_search_payload(self, make_paper):
+        papers = [make_paper(journal_name="Nowhere Journal") for _ in range(3)]
+        tools = ResearchTools(question="Q", client=FakeClient(papers))
+        payload = json.loads(tools.search_literature("q"))
+        assert payload["papers"] == []
+        assert payload["rejected_journals"] == [{"journal": "Nowhere Journal", "count": 3}]
+
+    def test_counts_accumulate_across_several_searches(self, make_paper):
+        papers = [make_paper(journal_name="Nowhere Journal")]
+        tools = ResearchTools(question="Q", client=FakeClient(papers))
+        tools.search_literature("first")
+        tools.search_literature("second")
+        assert tools.top_rejected_journals() == [{"journal": "Nowhere Journal", "count": 2}]
+
+    def test_the_saved_report_carries_the_exclusions(self, make_paper):
+        """A run that finds nothing should still be able to say why."""
+        papers = [make_paper(journal_name="Journal of Dairy Science")]
+        policy = JournalPolicy.build(fields=["physics"])
+        tools = ResearchTools(question="Q", client=FakeClient(papers), policy=policy)
+        tools.search_literature("q")
+        tools.save_research_report("Nothing found.", [], "Q")
+        assert tools.last_report["rejected_journals"] == [
+            {"journal": "Journal of Dairy Science", "count": 1}
+        ]
+
+    def test_nothing_is_reported_when_everything_passed(self, make_paper):
+        tools = ResearchTools(question="Q", client=FakeClient([make_paper(journal_name="Nature")]))
+        tools.search_literature("q")
+        assert tools.top_rejected_journals() == []

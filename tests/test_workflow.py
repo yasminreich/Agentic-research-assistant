@@ -25,18 +25,22 @@ class FakeProxy:
 
 
 class FakeTools:
-    def __init__(self, report=None):
+    def __init__(self, report=None, rejected=None):
         self.last_report = report
+        self._rejected = rejected or []
+
+    def top_rejected_journals(self, limit=10):
+        return self._rejected[:limit]
 
 
 @pytest.fixture
 def stub_team(monkeypatch):
     """Install a fake team and return the call log."""
 
-    def _install(report=None):
+    def _install(report=None, rejected=None):
         calls: list[dict] = []
         proxy = FakeProxy()
-        tools = FakeTools(report=None)
+        tools = FakeTools(report=None, rejected=rejected)
 
         def _build_team(question, settings=None, **kwargs):
             calls.append({"question": question, "settings": settings, **kwargs})
@@ -122,8 +126,17 @@ class TestResultShape:
         assert result["summary"] == ""
         assert result["paper_count"] == 0
         assert result["papers"] == []
+        assert result["rejected_journals"] == []
         assert result["json_path"] is None
         assert result["markdown_path"] is None
+
+    def test_a_no_report_run_still_explains_what_was_excluded(self, stub_team):
+        """The most useful thing an empty run can say is which venues it turned
+        away, so the user can widen the filter instead of guessing."""
+        stub_team(None, rejected=[{"journal": "Journal of Dairy Science", "count": 7}])
+        result = run_research("Does colostrum fat matter?")
+        assert result["saved"] is False
+        assert result["rejected_journals"] == [{"journal": "Journal of Dairy Science", "count": 7}]
 
     def test_a_partial_report_falls_back_to_defaults(self, stub_team):
         stub_team({"summary": "Only a summary."})
@@ -140,6 +153,7 @@ class TestResultShape:
             "summary",
             "paper_count",
             "papers",
+            "rejected_journals",
             "json_path",
             "markdown_path",
             "saved",

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from app.filters import TITLE_SIMILARITY_THRESHOLD, deduplicate_by_recency, filter_high_impact
+from app.filters import (
+    TITLE_SIMILARITY_THRESHOLD,
+    deduplicate_by_recency,
+    filter_high_impact,
+    rejected_journal_counts,
+)
+from app.journals import JournalPolicy
 
 
 class TestFilterHighImpact:
@@ -112,3 +118,55 @@ class TestDeduplicateByRecency:
 
     def test_threshold_is_a_sane_ratio(self):
         assert 0.5 < TITLE_SIMILARITY_THRESHOLD <= 1.0
+
+
+class TestPolicyAwareFiltering:
+    def test_a_narrowed_policy_drops_out_of_field_papers(self, make_paper):
+        policy = JournalPolicy.build(fields=["agriculture_food"])
+        papers = [
+            make_paper("Dairy work", journal_name="Journal of Dairy Science"),
+            make_paper("Physics work", journal_name="Nature"),
+        ]
+        assert [p.title for p in filter_high_impact(papers, policy)] == ["Dairy work"]
+
+    def test_extra_journals_are_honoured(self, make_paper):
+        policy = JournalPolicy.build(fields=["medicine"], extra_journals=["Poultry Weekly"])
+        papers = [make_paper("Bird study", journal_name="Poultry Weekly")]
+        assert len(filter_high_impact(papers, policy)) == 1
+
+    def test_the_default_argument_preserves_old_behaviour(self, make_paper):
+        papers = [make_paper(journal_name="Nature"), make_paper(journal_name="Nowhere Journal")]
+        assert len(filter_high_impact(papers)) == 1
+
+
+class TestRejectedJournalCounts:
+    def test_counts_excluded_journals_by_frequency(self, make_paper):
+        papers = [
+            make_paper(journal_name="Nowhere Journal"),
+            make_paper(journal_name="Nowhere Journal"),
+            make_paper(journal_name="Elsewhere Review"),
+            make_paper(journal_name="Nature"),
+        ]
+        assert rejected_journal_counts(papers) == [
+            {"journal": "Nowhere Journal", "count": 2},
+            {"journal": "Elsewhere Review", "count": 1},
+        ]
+
+    def test_allowlisted_journals_are_never_reported(self, make_paper):
+        papers = [make_paper(journal_name="Nature"), make_paper(journal_name="Cell")]
+        assert rejected_journal_counts(papers) == []
+
+    def test_papers_with_no_journal_are_skipped(self, make_paper):
+        assert rejected_journal_counts([make_paper(journal_name=None)]) == []
+
+    def test_respects_the_limit(self, make_paper):
+        papers = [make_paper(journal_name=f"Journal {i}") for i in range(20)]
+        assert len(rejected_journal_counts(papers, limit=5)) == 5
+
+    def test_reflects_a_narrowed_policy(self, make_paper):
+        """Under a narrow policy, otherwise-allowlisted journals show up here —
+        which is exactly what tells the user their filter was too tight."""
+        policy = JournalPolicy.build(fields=["agriculture_food"])
+        papers = [make_paper(journal_name="Nature"), make_paper(journal_name="Cell")]
+        reported = {entry["journal"] for entry in rejected_journal_counts(papers, policy)}
+        assert reported == {"Nature", "Cell"}

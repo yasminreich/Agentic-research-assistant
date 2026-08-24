@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from typing import Annotated
 
 from .config import Settings, get_settings
-from .filters import deduplicate_by_recency, filter_high_impact
+from .filters import deduplicate_by_recency, filter_high_impact, rejected_journal_counts
+from .journals import DEFAULT_POLICY, JournalPolicy
 from .paperclip_client import PaperclipClient, PaperclipError
 from .persistence import save_research_output
 
@@ -37,10 +39,19 @@ class ResearchTools:
         question: str,
         client: PaperclipClient | None = None,
         settings: Settings | None = None,
+        policy: JournalPolicy = DEFAULT_POLICY,
+        min_year: int | None = None,
     ) -> None:
         self.question = question
         self.settings = settings or get_settings()
         self.client = client or PaperclipClient()
+        # Which journals this run accepts, and the earliest year it considers.
+        # Both are per-run so one user's narrow search cannot affect another's.
+        self.policy = policy
+        self.min_year = min_year if min_year is not None else self.settings.min_year
+        # Journals dropped by the policy this run, aggregated across searches,
+        # so a zero-result run can tell the user what it turned away.
+        self.rejected: Counter[str] = Counter()
         # Full metadata of every curated paper we've surfaced, keyed by id.
         self.collected: dict[str, dict] = {}
         # Result of the most recent save_research_report call.
@@ -64,7 +75,7 @@ class ResearchTools:
         """Search the Paperclip database, filter to high-impact journals,
         deduplicate by recency, and return curated candidate papers as JSON.
         """
-        effective_year = year_from if year_from is not None else self.settings.min_year
+        effective_year = year_from if year_from is not None else self.min_year
         effective_limit = limit if limit is not None else self.settings.max_papers_per_query
 
         try:
@@ -73,8 +84,14 @@ class ResearchTools:
             logger.warning("Paperclip search failed for %r: %s", query, exc)
             return json.dumps({"query": query, "error": str(exc), "papers": []}, ensure_ascii=False)
 
-        high_impact = filter_high_impact(raw)
+        high_impact = filter_high_impact(raw, self.policy)
         curated = deduplicate_by_recency(high_impact)
+
+        # Record what the policy turned away, for the "why did I get nothing?"
+        # explanation the caller shows the user.
+        rejected = rejected_journal_counts(raw, self.policy, limit=50)
+        for entry in rejected:
+            self.rejected[entry["journal"]] += entry["count"]
 
         # Remember full metadata so we can resolve ids at save time.
         candidates = []
@@ -99,6 +116,8 @@ class ResearchTools:
                 "total_retrieved": len(raw),
                 "high_impact_count": len(high_impact),
                 "curated_count": len(curated),
+                "journal_policy": self.policy.describe(),
+                "rejected_journals": rejected[:10],
                 "papers": candidates,
             },
             ensure_ascii=False,
@@ -134,9 +153,16 @@ class ResearchTools:
         )
         result["summary"] = summary
         result["papers"] = selected
+        result["rejected_journals"] = self.top_rejected_journals()
         self.last_report = result
 
         return (
             f"Report saved with {result['paper_count']} papers. "
             f"JSON: {result['json_path']} | Markdown: {result['markdown_path']}"
         )
+
+    # --- reporting ----------------------------------------------------------
+
+    def top_rejected_journals(self, limit: int = 10) -> list[dict]:
+        """Journals the policy excluded across this run, most frequent first."""
+        return [{"journal": name, "count": n} for name, n in self.rejected.most_common(limit)]
