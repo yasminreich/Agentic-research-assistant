@@ -1,6 +1,10 @@
 # Maintained classic AutoGen (AG2) with Anthropic/Claude support.
-# The import path remains `import autogen`.
-ag2[anthropic]>=0.7
+#
+# Pinned below 1.0: ag2 1.0 renamed the top-level package from `autogen` to
+# `ag2`, so every `import autogen` in app/ fails against it. The upper bound is
+# what keeps a fresh install working; lifting it means migrating the imports
+# (and re-checking the load_config patch in app/anthropic_compat.py).
+ag2[anthropic]>=0.7,<1.0
 
 # Backend server
 fastapi>=0.110

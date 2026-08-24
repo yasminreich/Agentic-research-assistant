@@ -69,6 +69,11 @@ dedup + recency) live in plain Python so they're auditable. Semantic steps
   affected models. **Keep this shim** and keep `patch_ag2_anthropic_sampling()`
   called in `agents.py`. If Claude calls start 400-ing on sampling params, that
   patch is the place to look.
+- **AG2 is pinned `<1.0`.** ag2 1.0 renamed the top-level package `autogen` →
+  `ag2`, so every `import autogen` in `app/` breaks against it. Don't lift the
+  bound without migrating those imports and re-checking the `load_config`
+  patch. CI caught this because the old `>=0.7` floor let a fresh install
+  resolve 1.0.
 - **Keep the data source behind `PaperclipClient`.** `journals.py`, `filters.py`,
   `tools.py`, `agents.py`, `workflow.py`, `persistence.py` all depend only on the
   `Paper` dataclass — preserve it when changing APIs.
