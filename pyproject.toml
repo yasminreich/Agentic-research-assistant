@@ -28,8 +28,9 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests may shadow builtins and use assert-heavy, argument-free fixtures.
-"tests/*" = ["ARG001", "ARG002"]
+# Stubs and fixtures must match the signature they replace even when they
+# ignore the arguments, so unused-argument rules do not apply to tests.
+"tests/*" = ["ARG001", "ARG002", "ARG005"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
