@@ -22,8 +22,9 @@ JSON + Markdown to `output/`.
 |---|---|
 | `app/config.py` | Settings via `pydantic-settings` (reads `.env`). |
 | `app/openalex_client.py` | `OpenAlexClient` → OpenAlex Works API; normalizes to the `Paper` dataclass; backoff/retry. **The data source is isolated here** — swapping APIs means editing only this file (keep `Paper` + `search()` signature stable). |
-| `app/journals.py` | `JOURNALS_BY_FIELD`, `FIELD_LABELS`, `ALIASES`, and `JournalPolicy`. **Single source of truth for the reputable-journal policy.** |
+| `app/journals.py` | `JOURNALS_BY_FIELD` (24 fields, 255 journals), `FIELD_LABELS`, `FIELD_GROUPS`, `FIELD_ALIASES`, `ALIASES`, `JournalPolicy`. **Single source of truth for the reputable-journal policy.** |
 | `app/filters.py` | `filter_high_impact()`, `deduplicate_by_recency()`, `rejected_journal_counts()`. |
+| `app/verification.py` | Citation + quote checks on the model's output. Pure functions, no network. |
 | `app/tools.py` | `ResearchTools`: `search_literature` / `save_research_report` (per-run shared state). |
 | `app/agents.py` | Builds Researcher + Proxy, registers tools, defines the Anthropic `llm_config` and the Researcher system prompt template. |
 | `app/anthropic_compat.py` | **Required shim** — see Conventions. |
@@ -31,8 +32,9 @@ JSON + Markdown to `output/`.
 | `app/persistence.py` | Writes the JSON + Markdown reports. |
 | `app/server.py` | FastAPI app: `POST /research`, `GET /journals`, `GET /config`, `GET /health`. |
 | `app/static/index.html` | The whole web UI — one file, vanilla JS, no build step. |
-| `tests/` | 233 offline tests. No network, no API key. |
+| `tests/` | 334 offline tests. No network, no API key. |
 | `scripts/smoke_test.py` | Live pre-flight checks (real OpenAlex search + one real Claude call). |
+| `scripts/validate_journals.py` | Live check that every allowlist entry matches a real OpenAlex source. Run by hand after editing `journals.py`. |
 
 ## Conventions & gotchas (read before editing)
 
@@ -58,7 +60,23 @@ JSON + Markdown to `output/`.
   (a test enforces that they stay in sync).
 - **Journal matching is exact after normalization, not substring.** `"dairy
   science"` will never match *Journal of Dairy Science*. Add the full lowercase
-  title, and use `ALIASES` for abbreviations and leading-article variants.
+  title, and use `ALIASES` for abbreviations and leading-article variants. Run
+  `python -m scripts.validate_journals` after editing — OpenAlex's spelling is
+  often not the obvious one (*The* ISME Journal, *Cellular and Molecular*
+  Immunology), and a wrong entry fails silently forever.
+- **Don't add year-stamped venues.** OpenAlex indexes CVPR as `2022 IEEE/CVF
+  Conference on...`; a fixed entry can never match. They are absent on purpose.
+- **`FIELD_GROUPS` must partition `JOURNALS_BY_FIELD` exactly** — every key in
+  exactly one group. `FIELD_ALIASES` maps retired keys (e.g. `cs_ai`) to their
+  replacements so saved selections keep working; don't delete entries from it.
+- **`no_abstract` is not `not_found`.** In `verification.py`, a quote that
+  cannot be checked because OpenAlex has no abstract must never be reported as
+  fabricated, and must not make a report un-ok. Crying wolf trains the reader to
+  ignore the real warnings.
+- **OpenAlex ids come in two forms.** Papers are keyed by full URL
+  (`https://openalex.org/W123`); the model cites the bare `W123`. Always compare
+  via `verification.bare_id()` — the direct comparison matches nothing and
+  reports every citation as unverified.
 - **`fields` has three states.** `None` = every field (the controls were never
   touched). A list = those fields. An **empty list** = no field, so only
   `extra_journals` applies. Don't collapse the last two.
