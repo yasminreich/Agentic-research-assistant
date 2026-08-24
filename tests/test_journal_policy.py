@@ -65,9 +65,19 @@ class TestFieldSelection:
         assert policy.allows("Nature") is True
         assert policy.allows("American Economic Review") is False
 
-    @pytest.mark.parametrize("empty", [None, []])
-    def test_no_selection_means_every_field(self, empty):
-        assert JournalPolicy.build(fields=empty).allowed == HIGH_IMPACT_JOURNALS
+    def test_untouched_controls_mean_every_field(self):
+        """`None` = the caller never touched the field controls."""
+        assert JournalPolicy.build(fields=None).allowed == HIGH_IMPACT_JOURNALS
+
+    def test_an_explicitly_empty_list_means_no_field(self):
+        """`[]` = the user unchecked everything, which is a real choice and must
+        not silently widen back to "search everything"."""
+        assert JournalPolicy.build(fields=[]).allowed == set()
+
+    def test_an_empty_list_plus_extras_searches_only_the_extras(self):
+        policy = JournalPolicy.build(fields=[], extra_journals=["Poultry Weekly"])
+        assert policy.allows("Poultry Weekly") is True
+        assert policy.allows("Nature") is False
 
     def test_an_unknown_field_is_rejected_with_a_helpful_message(self):
         with pytest.raises(UnknownFieldError) as exc:
@@ -107,9 +117,8 @@ class TestExtraJournals:
         assert policy.allows("The Lancet") is True
         assert policy.allows("Poultry Weekly") is True
 
-    def test_extras_alone_narrow_to_just_those(self):
-        """With no fields chosen the default is still every field; extras add on
-        top rather than switching to an extras-only list."""
+    def test_extras_without_touching_the_fields_add_to_all_of_them(self):
+        """Naming a journal should not silently narrow the default scope."""
         policy = JournalPolicy.build(extra_journals=["Poultry Weekly"])
         assert policy.allows("Nature") is True
         assert policy.allows("Poultry Weekly") is True
@@ -118,6 +127,11 @@ class TestExtraJournals:
 class TestDescribe:
     def test_the_default_says_all_fields(self):
         assert DEFAULT_POLICY.describe() == "all fields"
+
+    def test_an_empty_selection_says_no_field(self):
+        assert (
+            JournalPolicy.build(fields=[], extra_journals=["X"]).describe().startswith("no field")
+        )
 
     def test_named_fields_use_human_labels(self):
         assert JournalPolicy.build(fields=["agriculture_food"]).describe() == (

@@ -151,6 +151,14 @@ def research(
             )
 
     extra_journals = [j.strip() for j in (request.extra_journals or []) if j.strip()]
+    if request.fields is not None and not request.fields and not extra_journals:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "No journals selected. Check at least one field, or name a journal "
+                "under 'Also accept these journals'."
+            ),
+        )
     if len(extra_journals) > MAX_EXTRA_JOURNALS:
         raise HTTPException(
             status_code=422,

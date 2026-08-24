@@ -114,6 +114,79 @@
     .paper .ttl { font-weight: 600; }
     .paper .meta { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
     .paper a { color: var(--accent); word-break: break-word; }
+
+    /* --- Advanced options --- */
+    details.adv {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0 16px;
+      margin-bottom: 16px;
+    }
+    details.adv > summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 12px 0;
+      list-style: revert;
+    }
+    details.adv[open] > summary { border-bottom: 1px solid var(--border); }
+    details.adv .body { padding: 16px 0 4px; }
+    input[type="number"], textarea#extra-journals {
+      width: 100%;
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    input[type="number"] { max-width: 140px; }
+    textarea#extra-journals { min-height: 74px; resize: vertical; }
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 6px 16px;
+      margin-bottom: 6px;
+    }
+    .fields label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-weight: 400;
+      font-size: 0.88rem;
+      margin: 0;
+      cursor: pointer;
+    }
+    .fields input { margin: 0; flex: none; }
+    .fields .count { color: var(--muted); font-size: 0.78rem; }
+    .field-actions {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 14px;
+      font-size: 0.82rem;
+    }
+    .link-btn {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--accent);
+      font: inherit;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .excluded {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 16px;
+      font-size: 0.88rem;
+    }
+    .excluded h3 { margin: 0 0 6px; font-size: 0.95rem; }
+    .excluded ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -136,6 +209,36 @@
         <input type="password" id="password" placeholder="Password given to you by the owner" />
         <div class="hint">Entered once, then remembered on this device.</div>
       </div>
+      <details class="adv" id="adv">
+        <summary>Advanced options</summary>
+        <div class="body">
+          <div class="row">
+            <label for="min-year">Earliest publication year</label>
+            <input type="number" id="min-year" min="1900" step="1" />
+            <div class="hint">Papers published before this year are ignored.</div>
+          </div>
+
+          <div class="row">
+            <label>Fields to search</label>
+            <div class="fields" id="fields"></div>
+            <div class="field-actions">
+              <button type="button" class="link-btn" id="select-all">Select all</button>
+              <button type="button" class="link-btn" id="select-none">Clear all</button>
+            </div>
+            <div class="hint">Only papers from journals in the checked fields are
+              considered. Leave everything checked to search all of them.</div>
+          </div>
+
+          <div class="row">
+            <label for="extra-journals">Also accept these journals</label>
+            <textarea id="extra-journals"
+              placeholder="One per line, e.g.&#10;Journal of Dairy Science&#10;Poultry Science"></textarea>
+            <div class="hint">Use the full journal title as it appears on the paper.
+              These are added on top of the fields you checked.</div>
+          </div>
+        </div>
+      </details>
+
       <button type="submit" id="submit">Run literature review</button>
     </form>
 
@@ -155,15 +258,58 @@
     const statusEl = document.getElementById("status");
     const errorEl = document.getElementById("error");
     const resultsEl = document.getElementById("results");
+    const minYearEl = document.getElementById("min-year");
+    const fieldsEl = document.getElementById("fields");
+    const extraEl = document.getElementById("extra-journals");
 
     // Remember the password on this device so testers enter it only once.
     passwordEl.value = localStorage.getItem("ra_password") || "";
 
-    // Only show the password field if the server actually requires one.
+    // Server-side limits, so this page never hardcodes a stale copy of them.
     fetch("/config")
       .then(r => r.json())
-      .then(c => { if (c.password_required) document.getElementById("pw-row").style.display = ""; })
+      .then(c => {
+        if (c.password_required) document.getElementById("pw-row").style.display = "";
+        if (c.max_question_chars) questionEl.maxLength = c.max_question_chars;
+        minYearEl.min = c.earliest_year || 1900;
+        minYearEl.max = new Date().getFullYear();
+        // A remembered year wins over the server default.
+        const saved = localStorage.getItem("ra_min_year");
+        minYearEl.value = saved || c.min_year || "";
+      })
       .catch(() => {});
+
+    // The field checkboxes are rendered from the server so app/journals.py stays
+    // the single source of truth for what fields exist.
+    const savedFields = JSON.parse(localStorage.getItem("ra_fields") || "null");
+    extraEl.value = localStorage.getItem("ra_extra_journals") || "";
+
+    fetch("/journals")
+      .then(r => r.json())
+      .then(data => {
+        fieldsEl.innerHTML = data.fields.map(f => {
+          // Default to every field checked; otherwise honour the saved selection.
+          const checked = !savedFields || savedFields.includes(f.key) ? " checked" : "";
+          return '<label><input type="checkbox" value="' + escapeHtml(f.key) + '"' + checked + ' />' +
+                 '<span>' + escapeHtml(f.label) +
+                 ' <span class="count">(' + f.count + ')</span></span></label>';
+        }).join("");
+      })
+      .catch(() => {
+        fieldsEl.innerHTML = '<div class="hint">Could not load the field list; ' +
+                             'all fields will be searched.</div>';
+      });
+
+    function checkedFields() {
+      return Array.from(fieldsEl.querySelectorAll("input:checked")).map(i => i.value);
+    }
+
+    function setAllFields(checked) {
+      fieldsEl.querySelectorAll("input").forEach(i => { i.checked = checked; });
+    }
+
+    document.getElementById("select-all").addEventListener("click", () => setAllFields(true));
+    document.getElementById("select-none").addEventListener("click", () => setAllFields(false));
 
     function escapeHtml(s) {
       return (s || "").replace(/[&<>"']/g, c => (
@@ -219,6 +365,9 @@
       if (!papers.length) {
         html += '<p style="color:var(--muted)">No papers met the high-impact criteria.</p>';
       }
+      if (!papers.length) {
+        html += excludedHtml(data.rejected_journals);
+      }
       for (const p of papers) {
         const link = paperLink(p);
         const journal = p.journal_name || p.venue || "Unknown venue";
@@ -237,9 +386,23 @@
       resultsEl.innerHTML = html;
     }
 
-    function showError(msg) {
+    // When the venue filter is why nothing came back, show what it turned away —
+    // the user can paste those titles straight into "Also accept these journals".
+    function excludedHtml(rejected) {
+      if (!rejected || !rejected.length) return "";
+      const items = rejected.map(r =>
+        "<li>" + escapeHtml(r.journal) + " <span class=\"count\">(" + r.count + ")</span></li>"
+      ).join("");
+      return '<div class="excluded"><h3>Journals excluded by your filter</h3>' +
+             '<div class="hint">These turned up in the search but are not in the fields ' +
+             'you checked. Paste any you trust into <em>Advanced options &rarr; Also accept ' +
+             'these journals</em> and run again.</div><ul>' + items + "</ul></div>";
+    }
+
+    function showError(msg, rejected) {
       errorEl.textContent = msg;
       errorEl.classList.add("show");
+      resultsEl.innerHTML = excludedHtml(rejected);
     }
 
     form.addEventListener("submit", async (e) => {
@@ -250,7 +413,16 @@
       resultsEl.innerHTML = "";
       if (question.length < 3) { showError("Please enter a research question."); return; }
 
+      const fields = checkedFields();
+      const extraJournals = extraEl.value.split("\n").map(t => t.trim()).filter(Boolean);
+      const minYear = minYearEl.value ? parseInt(minYearEl.value, 10) : null;
+
+      // Remember the selection on this device so it survives a reload.
       localStorage.setItem("ra_password", password);
+      localStorage.setItem("ra_fields", JSON.stringify(fields));
+      localStorage.setItem("ra_extra_journals", extraEl.value);
+      if (minYearEl.value) localStorage.setItem("ra_min_year", minYearEl.value);
+
       submitBtn.disabled = true;
       statusEl.classList.add("show");
 
@@ -261,7 +433,14 @@
         const resp = await fetch("/research", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-Access-Password": password },
-          body: JSON.stringify({ question }),
+          body: JSON.stringify({
+            question,
+            // An empty array is meaningful: the user unchecked every field, so
+            // only their named journals apply. null would mean "all fields".
+            fields,
+            extra_journals: extraJournals,
+            min_year: minYear,
+          }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -280,7 +459,14 @@
 
         const data = await resp.json();
         if (!data.saved && !data.summary) {
-          showError("No relevant high-impact papers were found for that question. Try rephrasing.");
+          const hasExclusions = (data.rejected_journals || []).length > 0;
+          showError(
+            hasExclusions
+              ? "No papers matched your journal filter. The venues below were excluded — " +
+                "widen the fields or add the ones you trust."
+              : "No relevant high-impact papers were found for that question. Try rephrasing.",
+            data.rejected_journals
+          );
           return;
         }
         renderResults(data);
