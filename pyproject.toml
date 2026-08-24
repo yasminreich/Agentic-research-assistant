@@ -34,5 +34,9 @@ select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The repo root must be importable so `from app...` works under a bare
+# `pytest` invocation. `python -m pytest` gets this free by prepending the
+# CWD; plain `pytest` (what CI runs) does not.
+pythonpath = ["."]
 addopts = "-q --strict-markers"
 filterwarnings = ["error::DeprecationWarning:app.*"]
