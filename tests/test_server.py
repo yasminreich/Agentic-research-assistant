@@ -23,6 +23,7 @@ RESULT = {
     "paper_count": 2,
     "papers": [{"title": "A"}, {"title": "B"}],
     "rejected_journals": [],
+    "unmatched_journals": [],
     "json_path": "output/x.json",
     "markdown_path": "output/x.md",
     "saved": True,
@@ -188,6 +189,7 @@ class TestResponseShape:
             "saved",
             "papers",
             "rejected_journals",
+            "unmatched_journals",
             "json_path",
             "markdown_path",
         }
@@ -214,22 +216,31 @@ def _settings(**overrides):
 
 
 class TestJournalsEndpoint:
-    def test_lists_every_field_with_a_label_and_count(self, client):
+    def test_lists_every_field_exactly_once_across_the_groups(self, client):
         body = client.get("/journals").json()
-        keys = {f["key"] for f in body["fields"]}
-        assert keys == set(JOURNALS_BY_FIELD)
-        for entry in body["fields"]:
-            assert entry["label"]
-            assert entry["count"] == len(JOURNALS_BY_FIELD[entry["key"]])
-            assert len(entry["examples"]) <= 3
+        keys = [f["key"] for g in body["groups"] for f in g["fields"]]
+        assert sorted(keys) == sorted(JOURNALS_BY_FIELD)
+        assert len(keys) == len(set(keys)), "a field appears in two groups"
 
-    def test_reports_the_total_journal_count(self, client):
+    def test_each_field_carries_a_label_count_and_examples(self, client):
         body = client.get("/journals").json()
+        for group in body["groups"]:
+            assert group["name"]
+            for entry in group["fields"]:
+                assert entry["label"]
+                assert entry["count"] == len(JOURNALS_BY_FIELD[entry["key"]])
+                assert len(entry["examples"]) <= 3
+
+    def test_reports_the_totals(self, client):
+        body = client.get("/journals").json()
+        assert body["total_fields"] == len(JOURNALS_BY_FIELD)
         assert body["total_journals"] == len(set().union(*JOURNALS_BY_FIELD.values()))
 
-    def test_fields_are_sorted_by_label_for_stable_rendering(self, client):
-        labels = [f["label"] for f in client.get("/journals").json()["fields"]]
-        assert labels == sorted(labels)
+    def test_group_order_is_stable(self, client):
+        """The UI renders groups in this order, so it must not depend on a set."""
+        first = [g["name"] for g in client.get("/journals").json()["groups"]]
+        second = [g["name"] for g in client.get("/journals").json()["groups"]]
+        assert first == second
 
 
 class TestConfigHints:

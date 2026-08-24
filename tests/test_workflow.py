@@ -25,22 +25,26 @@ class FakeProxy:
 
 
 class FakeTools:
-    def __init__(self, report=None, rejected=None):
+    def __init__(self, report=None, rejected=None, unmatched=None):
         self.last_report = report
         self._rejected = rejected or []
+        self._unmatched = unmatched or []
 
     def top_rejected_journals(self, limit=10):
         return self._rejected[:limit]
+
+    def unmatched_journals(self):
+        return list(self._unmatched)
 
 
 @pytest.fixture
 def stub_team(monkeypatch):
     """Install a fake team and return the call log."""
 
-    def _install(report=None, rejected=None):
+    def _install(report=None, rejected=None, unmatched=None):
         calls: list[dict] = []
         proxy = FakeProxy()
-        tools = FakeTools(report=None, rejected=rejected)
+        tools = FakeTools(report=None, rejected=rejected, unmatched=unmatched)
 
         def _build_team(question, settings=None, **kwargs):
             calls.append({"question": question, "settings": settings, **kwargs})
@@ -127,6 +131,7 @@ class TestResultShape:
         assert result["paper_count"] == 0
         assert result["papers"] == []
         assert result["rejected_journals"] == []
+        assert result["unmatched_journals"] == []
         assert result["json_path"] is None
         assert result["markdown_path"] is None
 
@@ -137,6 +142,12 @@ class TestResultShape:
         result = run_research("Does colostrum fat matter?")
         assert result["saved"] is False
         assert result["rejected_journals"] == [{"journal": "Journal of Dairy Science", "count": 7}]
+
+    def test_a_no_report_run_still_reports_unmatched_journals(self, stub_team):
+        """A typo'd journal name must surface even when nothing was saved."""
+        stub_team(None, unmatched=["gut microbs"])
+        result = run_research("Does the microbiome matter?")
+        assert result["unmatched_journals"] == ["gut microbs"]
 
     def test_a_partial_report_falls_back_to_defaults(self, stub_team):
         stub_team({"summary": "Only a summary."})
@@ -154,6 +165,7 @@ class TestResultShape:
             "paper_count",
             "papers",
             "rejected_journals",
+            "unmatched_journals",
             "json_path",
             "markdown_path",
             "saved",
