@@ -8,11 +8,19 @@ Ask a research question in your browser and get a clear, cited summary of the
 scientific literature — written by AI agents that search real papers and focus on
 high-impact journals.
 
-![The Research Assistant web page — type a question, then read the summary and papers.](docs/screenshots/landing.svg)
+![The Research Assistant web page: a research question, and an Advanced options panel with an earliest-year field, checkboxes for 14 journal fields, and a box for naming extra journals.](docs/screenshots/form.png)
 
-**[→ See a real report this produced](docs/example-report.md)** — 25 papers on
-colostrum fat composition, every citation a resolvable DOI. Nothing in it was
-written by hand.
+Ask a question, pick the fields it belongs to, and get a grounded summary:
+
+![The rendered result: a Summary card answering the question.](docs/screenshots/result.png)
+
+…followed by every paper it drew on, with journal, year, citation count and a
+resolvable DOI:
+
+![The selected-papers list: five papers from Journal of Dairy Science, Journal of Animal Science and animal, each with a DOI link.](docs/screenshots/papers.png)
+
+**[→ Read a full report end to end](docs/example-report.md)** — 25 papers, every
+citation resolvable. Nothing in it was written by hand.
 
 ## How it works
 
