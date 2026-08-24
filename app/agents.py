@@ -1,9 +1,9 @@
 """Construct the two-agent AG2 team and wire up the tools.
 
-  - Researcher (AssistantAgent, Claude): plans searches, judges relevance,
-    clusters same-conclusion papers, writes the summary, calls the save tool.
-  - Proxy (UserProxyAgent): executes the registered tool functions. No human
-    input; terminates when the Researcher emits TERMINATE.
+- Researcher (AssistantAgent, Claude): plans searches, judges relevance,
+  clusters same-conclusion papers, writes the summary, calls the save tool.
+- Proxy (UserProxyAgent): executes the registered tool functions. No human
+  input; terminates when the Researcher emits TERMINATE.
 """
 
 from __future__ import annotations
@@ -99,11 +99,12 @@ def build_team(question: str, settings: Settings | None = None):
         query: Annotated[str, "Free-text search query for the literature database."],
         year_from: Annotated[
             int | None,
-            "Only include papers published in this year or later. Defaults to the configured minimum year.",
+            "Only include papers published in this year or later. Defaults to the "
+            "configured minimum year.",
         ] = None,
         limit: Annotated[
             int | None,
-            "Maximum number of papers to retrieve for this query (capped at 100).",
+            "Maximum number of papers to retrieve for this query (the API caps this at 200).",
         ] = None,
     ) -> str:
         return tools.search_literature(query, year_from=year_from, limit=limit)

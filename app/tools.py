@@ -53,11 +53,12 @@ class ResearchTools:
         query: Annotated[str, "Free-text search query for the literature database."],
         year_from: Annotated[
             int | None,
-            "Only include papers published in this year or later. Defaults to the configured minimum year.",
+            "Only include papers published in this year or later. Defaults to the "
+            "configured minimum year.",
         ] = None,
         limit: Annotated[
             int | None,
-            "Maximum number of papers to retrieve for this query (capped at 100).",
+            "Maximum number of papers to retrieve for this query (the API caps this at 200).",
         ] = None,
     ) -> str:
         """Search the Paperclip database, filter to high-impact journals,
@@ -67,14 +68,10 @@ class ResearchTools:
         effective_limit = limit if limit is not None else self.settings.max_papers_per_query
 
         try:
-            raw = self.client.search(
-                query, limit=effective_limit, year_from=effective_year
-            )
+            raw = self.client.search(query, limit=effective_limit, year_from=effective_year)
         except PaperclipError as exc:
             logger.warning("Paperclip search failed for %r: %s", query, exc)
-            return json.dumps(
-                {"query": query, "error": str(exc), "papers": []}, ensure_ascii=False
-            )
+            return json.dumps({"query": query, "error": str(exc), "papers": []}, ensure_ascii=False)
 
         high_impact = filter_high_impact(raw)
         curated = deduplicate_by_recency(high_impact)
@@ -119,9 +116,7 @@ class ResearchTools:
             list[str],
             "The paper_id values of the relevant papers to include in the report.",
         ],
-        question: Annotated[
-            str, "The original research question being answered."
-        ] = "",
+        question: Annotated[str, "The original research question being answered."] = "",
     ) -> str:
         """Resolve the selected paper ids to full metadata and write the report
         to disk. Returns a confirmation message with the saved file paths.

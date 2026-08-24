@@ -31,7 +31,7 @@ def _format_authors(authors: list[str]) -> str:
 
 def _render_markdown(question: str, summary: str, papers: list[dict], generated_at: str) -> str:
     lines = [
-        f"# Research Report",
+        "# Research Report",
         "",
         f"**Question:** {question}",
         "",
@@ -91,9 +91,7 @@ def save_research_output(
         "papers": papers,
     }
     json_path.write_text(json.dumps(json_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    md_path.write_text(
-        _render_markdown(question, summary, papers, generated_at), encoding="utf-8"
-    )
+    md_path.write_text(_render_markdown(question, summary, papers, generated_at), encoding="utf-8")
 
     return {
         "json_path": str(json_path),

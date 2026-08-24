@@ -56,7 +56,6 @@ class Paper:
     venue: str | None
     journal_name: str | None
     citation_count: int
-    influential_citation_count: int
     authors: list[str] = field(default_factory=list)
     doi: str | None = None
     url: str | None = None
@@ -94,16 +93,13 @@ class PaperclipClient:
         *,
         limit: int = 50,
         year_from: int | None = None,
-        fields_of_study: list[str] | None = None,  # noqa: ARG002 - kept for interface compat
     ) -> list[Paper]:
         """Search the literature for `query` and return normalized papers.
 
         Args:
             query: Free-text search query (matches titles, abstracts, fulltext).
-            limit: Max results to return (capped at 200 by the API).
+            limit: Max results to return (capped at `MAX_LIMIT` by the API).
             year_from: Only include papers published in this year or later.
-            fields_of_study: Accepted for interface compatibility; unused for
-                OpenAlex (it uses a different `concepts` filter).
         """
         filters = ["type:article"]
         if year_from is not None:
@@ -226,7 +222,6 @@ class PaperclipClient:
             venue=journal_name,
             journal_name=journal_name.strip() if isinstance(journal_name, str) else None,
             citation_count=record.get("cited_by_count") or 0,
-            influential_citation_count=0,  # OpenAlex has no equivalent metric
             authors=authors,
             doi=doi,
             url=url,
