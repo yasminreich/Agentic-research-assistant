@@ -186,6 +186,35 @@
       cursor: pointer;
       text-decoration: underline;
     }
+    .verify {
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      background: var(--card);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      font-size: 0.88rem;
+    }
+    .verify.warn { border-left-color: #d97706; }
+    .verify ul { margin: 6px 0 0; padding-left: 20px; }
+    .verify li { margin-bottom: 2px; }
+    .verify .prov {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .quote {
+      border-left: 3px solid var(--border);
+      margin: 8px 0 0;
+      padding: 2px 0 2px 10px;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .quote .tag { font-size: 0.75rem; font-weight: 600; }
+    .quote .tag.ok { color: #15803d; }
+    .quote .tag.bad { color: #b91c1c; }
     .excluded {
       background: var(--card);
       border: 1px solid var(--border);
@@ -365,6 +394,58 @@
       return html.join("");
     }
 
+    // What was checked mechanically, and what could not be confirmed. Reports
+    // uncertainty honestly: a missing abstract means "cannot check", never
+    // "fabricated".
+    function verificationHtml(v) {
+      if (!v || !v.citations) return "";
+      const c = v.citations, q = v.quotes || { tally: {}, total: 0 };
+      const t = q.tally || {};
+      const items = [];
+
+      if (c.cited_count) {
+        items.push("&#10003; " + c.verified_count + " of " + c.cited_count +
+                   " citations in the summary match papers this run retrieved.");
+      }
+      if ((c.unverified || []).length) {
+        items.push("&#9888; <strong>" + c.unverified.length + " citation(s) not verified</strong> — " +
+                   escapeHtml(c.unverified.join(", ")) + " was never returned by any search.");
+      }
+      if (q.total) {
+        items.push("&#10003; " + (t.supported || 0) + " of " + q.total +
+                   " supporting quotes were found in the cited paper's abstract.");
+      }
+      if (t.not_found) {
+        items.push("&#9888; <strong>" + t.not_found + " quote(s) were NOT found</strong> in the " +
+                   "abstract they were attributed to.");
+      }
+      if (t.no_abstract) {
+        items.push("&#8505; " + t.no_abstract + " quote(s) could not be checked — OpenAlex has " +
+                   "no abstract for that paper. This is not a sign of a problem.");
+      }
+      if ((v.unknown_paper_ids || []).length) {
+        items.push("&#9888; <strong>" + v.unknown_paper_ids.length + " requested paper id(s) did " +
+                   "not exist</strong> and were dropped.");
+      }
+      if (!items.length) return "";
+
+      return '<div class="verify' + (v.ok ? '' : ' warn') + '"><ul>' +
+             items.map(i => "<li>" + i + "</li>").join("") + '</ul>' +
+             '<div class="prov">Titles, journals, years and DOIs come from OpenAlex and are ' +
+             'never written by the model. The summary text is the model's synthesis — ' +
+             'open any DOI below to check a claim yourself.</div></div>';
+    }
+
+    function quotesHtml(evidence) {
+      if (!evidence || !evidence.length) return "";
+      return evidence.map(e => {
+        const ok = e.status === "supported";
+        const tag = ok ? '<span class="tag ok">quote verified in abstract</span>'
+                       : '<span class="tag bad">quote ' + escapeHtml(e.status || "unchecked") + '</span>';
+        return '<div class="quote">&ldquo;' + escapeHtml(e.quote || "") + '&rdquo;<br />' + tag + '</div>';
+      }).join("");
+    }
+
     function paperLink(p) {
       if (p.doi) return "https://doi.org/" + p.doi;
       return p.url || null;
@@ -378,6 +459,7 @@
 
     function renderResults(data) {
       let html = unmatchedHtml(data.unmatched_journals);
+      html += verificationHtml(data.verification);
       if (data.summary) {
         html += '<div class="summary"><h2>Summary</h2>' + renderMarkdown(data.summary) + "</div>";
       }
@@ -402,6 +484,7 @@
           html += '<div class="meta"><a href="' + escapeHtml(link) +
                   '" target="_blank" rel="noopener">' + escapeHtml(link) + "</a></div>";
         }
+        html += quotesHtml(p.evidence);
         html += "</div>";
       }
       resultsEl.innerHTML = html;

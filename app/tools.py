@@ -24,6 +24,7 @@ from .filters import deduplicate_by_recency, filter_high_impact, rejected_journa
 from .journals import DEFAULT_POLICY, JournalPolicy, normalize_journal_name
 from .openalex_client import OpenAlexClient, OpenAlexError
 from .persistence import save_research_output
+from .verification import bare_id, build_report
 
 logger = logging.getLogger(__name__)
 
@@ -145,25 +146,62 @@ class ResearchTools:
             "The paper_id values of the relevant papers to include in the report.",
         ],
         question: Annotated[str, "The original research question being answered."] = "",
+        evidence: Annotated[
+            list[dict] | None,
+            (
+                "Supporting evidence for the summary's main claims: a list of "
+                '{"paper_id": "W...", "quote": "..."} objects, where each quote is '
+                "copied VERBATIM from that paper's abstract. Quotes are checked "
+                "against the abstract automatically."
+            ),
+        ] = None,
     ) -> str:
-        """Resolve the selected paper ids to full metadata and write the report
-        to disk. Returns a confirmation message with the saved file paths.
+        """Resolve the selected paper ids to full metadata, verify the summary's
+        citations and quotes, and write the report to disk. Returns a
+        confirmation message with the saved file paths.
         """
         selected = [self.collected[pid] for pid in paper_ids if pid in self.collected]
         unknown = [pid for pid in paper_ids if pid not in self.collected]
         if unknown:
             logger.warning("save_research_report got unknown paper ids: %s", unknown)
 
+        # Mechanical checks on what the model wrote. These never block the save:
+        # the point is to report what could not be confirmed, not to gate on it.
+        verification = build_report(
+            summary=summary,
+            selected_ids=[p["paper_id"] for p in selected],
+            retrieved_ids=set(self.collected),
+            evidence=evidence or [],
+            collected=self.collected,
+            unknown_paper_ids=unknown,
+        )
+        if not verification["ok"]:
+            logger.warning("Verification flagged issues: %s", verification)
+
+        # Attach each verified quote to its paper so the UI and the Markdown
+        # report can show the evidence next to the source it came from.
+        # Keyed by bare id: papers carry the full OpenAlex URL, the model cites
+        # the short form.
+        quotes_by_paper: dict[str, list[dict]] = {}
+        for item in verification["quotes"]["results"]:
+            quotes_by_paper.setdefault(bare_id(item["paper_id"]), []).append(
+                {"quote": item["quote"], "status": item["status"]}
+            )
+        for paper in selected:
+            paper["evidence"] = quotes_by_paper.get(bare_id(paper["paper_id"]), [])
+
         result = save_research_output(
             question=question or self.question,
             summary=summary,
             papers=selected,
             output_dir=self.settings.output_dir,
+            verification=verification,
         )
         result["summary"] = summary
         result["papers"] = selected
         result["rejected_journals"] = self.top_rejected_journals()
         result["unmatched_journals"] = self.unmatched_journals()
+        result["verification"] = verification
         self.last_report = result
 
         return (

@@ -73,6 +73,7 @@ def run_research(
             # Even with nothing saved, these explain why.
             "rejected_journals": tools.top_rejected_journals(),
             "unmatched_journals": tools.unmatched_journals(),
+            "verification": {},
             "json_path": None,
             "markdown_path": None,
             "saved": False,
@@ -85,6 +86,7 @@ def run_research(
         "papers": report.get("papers", []),
         "rejected_journals": report.get("rejected_journals", []),
         "unmatched_journals": report.get("unmatched_journals", []),
+        "verification": report.get("verification", {}),
         "json_path": report.get("json_path"),
         "markdown_path": report.get("markdown_path"),
         "saved": True,

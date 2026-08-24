@@ -6,7 +6,13 @@ import json
 
 import pytest
 
-from app.persistence import _format_authors, _render_markdown, _slugify, save_research_output
+from app.persistence import (
+    _format_authors,
+    _render_markdown,
+    _render_verification,
+    _slugify,
+    save_research_output,
+)
 
 
 class TestSlugify:
@@ -100,3 +106,127 @@ class TestSaveResearchOutput:
     def test_filename_carries_a_slug_of_the_question(self, tmp_path):
         result = save_research_output("Does fasting help?", "S", [], output_dir=str(tmp_path))
         assert "does-fasting-help" in result["json_path"]
+
+
+class TestRenderVerification:
+    """The audit block a reader actually sees in the saved report."""
+
+    def test_absent_verification_renders_nothing(self):
+        assert _render_verification(None) == []
+        assert _render_verification({}) == []
+
+    def test_reports_the_citation_tally(self):
+        block = "\n".join(
+            _render_verification(
+                {
+                    "citations": {"cited_count": 5, "verified_count": 5, "unverified": []},
+                    "quotes": {"total": 0, "tally": {}},
+                }
+            )
+        )
+        assert "5 of 5 citations" in block
+
+    def test_an_unverified_citation_is_called_out_by_id(self):
+        block = "\n".join(
+            _render_verification(
+                {
+                    "citations": {
+                        "cited_count": 2,
+                        "verified_count": 1,
+                        "unverified": ["W9999999"],
+                    },
+                    "quotes": {"total": 0, "tally": {}},
+                }
+            )
+        )
+        assert "could not be verified" in block
+        assert "W9999999" in block
+
+    def test_a_missing_abstract_is_worded_as_uncheckable(self):
+        """It must not read as an accusation — OpenAlex simply has no abstract
+        for many records, and crying wolf teaches readers to ignore the block."""
+        block = "\n".join(
+            _render_verification(
+                {
+                    "citations": {"cited_count": 0, "verified_count": 0, "unverified": []},
+                    "quotes": {"total": 1, "tally": {"no_abstract": 1}},
+                }
+            )
+        )
+        assert "could not be checked" in block
+        assert "not evidence of a problem" in block
+        assert "NOT found" not in block
+
+    def test_a_missing_quote_is_stated_plainly(self):
+        block = "\n".join(
+            _render_verification(
+                {
+                    "citations": {"cited_count": 1, "verified_count": 1, "unverified": []},
+                    "quotes": {"total": 2, "tally": {"supported": 1, "not_found": 1}},
+                }
+            )
+        )
+        assert "NOT found" in block
+
+    def test_dropped_paper_ids_are_reported(self):
+        block = "\n".join(
+            _render_verification(
+                {
+                    "citations": {"cited_count": 0, "verified_count": 0, "unverified": []},
+                    "quotes": {"total": 0, "tally": {}},
+                    "unknown_paper_ids": ["W888888"],
+                }
+            )
+        )
+        assert "did not exist" in block
+        assert "W888888" in block
+
+    def test_it_always_states_what_is_api_data_versus_model_prose(self):
+        block = "\n".join(
+            _render_verification(
+                {
+                    "citations": {"cited_count": 1, "verified_count": 1, "unverified": []},
+                    "quotes": {"total": 0, "tally": {}},
+                }
+            )
+        )
+        assert "come from OpenAlex" in block
+        assert "model's synthesis" in block
+
+
+class TestVerificationInSavedFiles:
+    VERIFICATION = {
+        "citations": {"cited_count": 1, "verified_count": 1, "unverified": []},
+        "quotes": {"total": 1, "tally": {"supported": 1}},
+        "unknown_paper_ids": [],
+        "ok": True,
+    }
+
+    def test_the_json_carries_the_audit(self, tmp_path):
+        result = save_research_output(
+            "Q", "S", [], output_dir=str(tmp_path), verification=self.VERIFICATION
+        )
+        payload = json.loads(open(result["json_path"], encoding="utf-8").read())
+        assert payload["verification"] == self.VERIFICATION
+
+    def test_the_json_has_an_empty_audit_when_none_was_run(self, tmp_path):
+        result = save_research_output("Q", "S", [], output_dir=str(tmp_path))
+        payload = json.loads(open(result["json_path"], encoding="utf-8").read())
+        assert payload["verification"] == {}
+
+    def test_the_markdown_shows_supporting_quotes_under_each_paper(self, tmp_path):
+        papers = [
+            {
+                "title": "A trial",
+                "authors": ["Ada L"],
+                "journal_name": "Nature",
+                "year": 2022,
+                "evidence": [{"quote": "the observed effect was modest", "status": "supported"}],
+            }
+        ]
+        result = save_research_output(
+            "Q", "S", papers, output_dir=str(tmp_path), verification=self.VERIFICATION
+        )
+        markdown = open(result["markdown_path"], encoding="utf-8").read()
+        assert "the observed effect was modest" in markdown
+        assert "quote verified" in markdown

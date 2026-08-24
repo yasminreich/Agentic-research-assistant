@@ -24,6 +24,7 @@ RESULT = {
     "papers": [{"title": "A"}, {"title": "B"}],
     "rejected_journals": [],
     "unmatched_journals": [],
+    "verification": {},
     "json_path": "output/x.json",
     "markdown_path": "output/x.md",
     "saved": True,
@@ -190,6 +191,7 @@ class TestResponseShape:
             "papers",
             "rejected_journals",
             "unmatched_journals",
+            "verification",
             "json_path",
             "markdown_path",
         }
