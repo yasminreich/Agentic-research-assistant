@@ -4,7 +4,7 @@ Run from the project root:
     python -m scripts.smoke_test
 
 Checks, in order:
-  1. Paperclip (OpenAlex) search + high-impact filter + dedup. Needs network but
+  1. OpenAlex search + high-impact filter + dedup. Needs network but
      no API key.
   2. The Claude-through-AG2 path (only if ANTHROPIC_API_KEY is set). This is the
      important one: it confirms AG2's Anthropic client and the configured model
@@ -19,15 +19,15 @@ import sys
 
 from app.config import get_settings
 from app.filters import deduplicate_by_recency, filter_high_impact
-from app.paperclip_client import PaperclipClient, PaperclipError
+from app.openalex_client import OpenAlexClient, OpenAlexError
 
 
-def check_paperclip() -> bool:
-    print("== Paperclip (OpenAlex) search check ==")
-    client = PaperclipClient()
+def check_openalex() -> bool:
+    print("== OpenAlex search check ==")
+    client = OpenAlexClient()
     try:
         papers = client.search("intermittent fasting insulin sensitivity", limit=20, year_from=2015)
-    except PaperclipError as exc:
+    except OpenAlexError as exc:
         print(f"  FAIL: {exc}")
         return False
 
@@ -79,7 +79,7 @@ def check_llm() -> bool:
 
 
 def main() -> int:
-    ok = check_paperclip()
+    ok = check_openalex()
     ok = check_llm() and ok
     print("\nALL PASSED" if ok else "\nSOME CHECKS FAILED")
     return 0 if ok else 1

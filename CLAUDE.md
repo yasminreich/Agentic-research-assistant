@@ -8,7 +8,7 @@ file covers only what a contributor needs that the README doesn't say.
 ## Architecture in one line
 
 `POST /research` → `workflow.run_research()` → AG2 chat between a **Researcher**
-(Claude) and a **Proxy** (runs the tools) → `PaperclipClient` hits OpenAlex →
+(Claude) and a **Proxy** (runs the tools) → `OpenAlexClient` hits OpenAlex →
 `filters` applies the journal policy and recency dedup → `persistence` writes
 JSON + Markdown to `output/`.
 
@@ -21,7 +21,7 @@ JSON + Markdown to `output/`.
 | File | Role |
 |---|---|
 | `app/config.py` | Settings via `pydantic-settings` (reads `.env`). |
-| `app/paperclip_client.py` | `PaperclipClient` → OpenAlex Works API; normalizes to the `Paper` dataclass; backoff/retry. **The data source is isolated here** — swapping APIs means editing only this file (keep `Paper` + `search()` signature stable). |
+| `app/openalex_client.py` | `OpenAlexClient` → OpenAlex Works API; normalizes to the `Paper` dataclass; backoff/retry. **The data source is isolated here** — swapping APIs means editing only this file (keep `Paper` + `search()` signature stable). |
 | `app/journals.py` | `JOURNALS_BY_FIELD`, `FIELD_LABELS`, `ALIASES`, and `JournalPolicy`. **Single source of truth for the reputable-journal policy.** |
 | `app/filters.py` | `filter_high_impact()`, `deduplicate_by_recency()`, `rejected_journal_counts()`. |
 | `app/tools.py` | `ResearchTools`: `search_literature` / `save_research_report` (per-run shared state). |
@@ -49,7 +49,7 @@ JSON + Markdown to `output/`.
   bound without migrating those imports and re-checking the `load_config`
   patch. CI caught this because the old `>=0.7` floor let a fresh install
   resolve 1.0.
-- **Keep the data source behind `PaperclipClient`.** `journals.py`, `filters.py`,
+- **Keep the data source behind `OpenAlexClient`.** `journals.py`, `filters.py`,
   `tools.py`, `agents.py`, `workflow.py`, `persistence.py` all depend only on the
   `Paper` dataclass — preserve it when changing APIs.
 - **High-impact policy** changes go in `journals.py` only. The web UI builds its
@@ -77,7 +77,7 @@ ruff check . && ruff format --check .
 CI (`.github/workflows/ci.yml`) runs exactly those on Python 3.10/3.11/3.12.
 
 **Keep the suite offline.** The two injection seams that make that possible are
-`PaperclipClient(session=...)` and `ResearchTools(client=...)` — don't remove
+`OpenAlexClient(session=...)` and `ResearchTools(client=...)` — don't remove
 them. Anything needing a real API call belongs in `scripts/smoke_test.py`, which
 is run by hand.
 

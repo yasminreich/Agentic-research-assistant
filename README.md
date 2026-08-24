@@ -30,8 +30,7 @@ Two AI agents (built on the AG2 / AutoGen framework) work together on each quest
   which returned papers are actually relevant, groups papers that reach the same
   conclusion (keeping the most recent), and writes the final cited summary.
 - **Proxy agent** — runs the searches the Researcher asks for, against
-  **OpenAlex**, a free open database of scientific papers (codenamed "Paperclip" in
-  the code).
+  **OpenAlex**, a free and open catalogue of scientific papers.
 
 Results are filtered to a curated list of **high-impact journals**, **deduplicated
 by recency** (when several papers agree, the most recent one wins), and saved to the
@@ -146,7 +145,7 @@ pytest                  # 233 tests, no network and no API key needed
 ruff check . && ruff format --check .
 ```
 
-The suite is entirely offline — `PaperclipClient` takes an injected
+The suite is entirely offline — `OpenAlexClient` takes an injected
 `requests.Session` and `ResearchTools` takes an injected client, so nothing in
 `tests/` makes a real call or spends money. CI runs the same three commands on
 Python 3.10, 3.11 and 3.12.
@@ -227,7 +226,7 @@ return nothing.
 ```
 app/
   config.py            # settings (pydantic-settings)
-  paperclip_client.py  # OpenAlex Works API client
+  openalex_client.py   # OpenAlex Works API client
   journals.py          # journal fields, allowlist, JournalPolicy
   filters.py           # policy filter, recency dedup, excluded-journal counts
   tools.py             # search / save tools the agents call

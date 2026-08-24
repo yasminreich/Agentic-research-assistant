@@ -3,7 +3,7 @@
 `ResearchTools` bundles the two functions exposed to the agents together with
 the per-run state they share:
 
-  - `search_literature`   — Proxy executes this; calls Paperclip, applies the
+  - `search_literature`   — Proxy executes this; calls OpenAlex, applies the
     high-impact filter and recency dedup, and returns curated candidates.
   - `save_research_report` — Proxy executes this; resolves the paper ids the
     Researcher selected back to full metadata and writes the report to disk.
@@ -22,7 +22,7 @@ from typing import Annotated
 from .config import Settings, get_settings
 from .filters import deduplicate_by_recency, filter_high_impact, rejected_journal_counts
 from .journals import DEFAULT_POLICY, JournalPolicy
-from .paperclip_client import PaperclipClient, PaperclipError
+from .openalex_client import OpenAlexClient, OpenAlexError
 from .persistence import save_research_output
 
 logger = logging.getLogger(__name__)
@@ -37,14 +37,14 @@ class ResearchTools:
     def __init__(
         self,
         question: str,
-        client: PaperclipClient | None = None,
+        client: OpenAlexClient | None = None,
         settings: Settings | None = None,
         policy: JournalPolicy = DEFAULT_POLICY,
         min_year: int | None = None,
     ) -> None:
         self.question = question
         self.settings = settings or get_settings()
-        self.client = client or PaperclipClient()
+        self.client = client or OpenAlexClient()
         # Which journals this run accepts, and the earliest year it considers.
         # Both are per-run so one user's narrow search cannot affect another's.
         self.policy = policy
@@ -72,7 +72,7 @@ class ResearchTools:
             "Maximum number of papers to retrieve for this query (the API caps this at 200).",
         ] = None,
     ) -> str:
-        """Search the Paperclip database, filter to high-impact journals,
+        """Search OpenAlex, filter to high-impact journals,
         deduplicate by recency, and return curated candidate papers as JSON.
         """
         effective_year = year_from if year_from is not None else self.min_year
@@ -80,8 +80,8 @@ class ResearchTools:
 
         try:
             raw = self.client.search(query, limit=effective_limit, year_from=effective_year)
-        except PaperclipError as exc:
-            logger.warning("Paperclip search failed for %r: %s", query, exc)
+        except OpenAlexError as exc:
+            logger.warning("OpenAlex search failed for %r: %s", query, exc)
             return json.dumps({"query": query, "error": str(exc), "papers": []}, ensure_ascii=False)
 
         high_impact = filter_high_impact(raw, self.policy)

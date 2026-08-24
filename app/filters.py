@@ -1,6 +1,6 @@
 """Deterministic post-processing of search results.
 
-Two reproducible steps applied to raw Paperclip results before they reach the
+Two reproducible steps applied to raw OpenAlex results before they reach the
 Researcher Agent:
 
 1. `filter_high_impact` — keep only papers from journals the run's
@@ -20,7 +20,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 
 from .journals import DEFAULT_POLICY, JournalPolicy
-from .paperclip_client import Paper
+from .openalex_client import Paper
 
 # Two titles with a similarity ratio at/above this are treated as the same work.
 TITLE_SIMILARITY_THRESHOLD = 0.92

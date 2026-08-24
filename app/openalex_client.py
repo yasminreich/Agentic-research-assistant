@@ -1,10 +1,11 @@
-"""Client for the Paperclip literature database.
+"""Client for the OpenAlex Works API (https://api.openalex.org/works).
 
-"Paperclip" is our internal codename for the literature source. It is backed by
-the **OpenAlex** Works API (https://api.openalex.org/works), which is free and
-requires no API key. This module is the single place that knows about the
-upstream wire format; everything else in the app works with the normalized
-`Paper` dataclass below.
+OpenAlex is a free, open catalogue of scholarly works and needs no API key.
+
+This module is the single place that knows about the upstream wire format.
+Everything else in the app works with the normalized `Paper` dataclass below,
+so swapping the data source means rewriting only this file — keep `Paper` and
+the `search()` signature stable if you do.
 
 Setting an email via `OPENALEX_MAILTO` opts into OpenAlex's faster "polite pool"
 (recommended, but not required).
@@ -64,11 +65,11 @@ class Paper:
         return asdict(self)
 
 
-class PaperclipError(RuntimeError):
-    """Raised when the Paperclip (OpenAlex) API cannot be reached."""
+class OpenAlexError(RuntimeError):
+    """Raised when the OpenAlex API cannot be reached."""
 
 
-class PaperclipClient:
+class OpenAlexClient:
     """Thin, retrying wrapper over the OpenAlex Works API."""
 
     def __init__(
@@ -150,8 +151,8 @@ class PaperclipClient:
                 return response.json()
 
             if response.status_code == 429 or response.status_code >= 500:
-                last_error = PaperclipError(
-                    f"Paperclip returned {response.status_code}: {response.text[:200]}"
+                last_error = OpenAlexError(
+                    f"OpenAlex returned {response.status_code}: {response.text[:200]}"
                 )
                 retry_after = response.headers.get("Retry-After")
                 if retry_after and retry_after.isdigit():
@@ -161,12 +162,12 @@ class PaperclipClient:
                 continue
 
             # Non-retryable client error.
-            raise PaperclipError(
-                f"Paperclip request failed ({response.status_code}): {response.text[:200]}"
+            raise OpenAlexError(
+                f"OpenAlex request failed ({response.status_code}): {response.text[:200]}"
             )
 
-        raise PaperclipError(
-            f"Paperclip request failed after {self._max_retries + 1} attempts"
+        raise OpenAlexError(
+            f"OpenAlex request failed after {self._max_retries + 1} attempts"
         ) from last_error
 
     @staticmethod
