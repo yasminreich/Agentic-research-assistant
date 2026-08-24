@@ -207,3 +207,45 @@ class TestRejectedJournalReporting:
         tools = ResearchTools(question="Q", client=FakeClient([make_paper(journal_name="Nature")]))
         tools.search_literature("q")
         assert tools.top_rejected_journals() == []
+
+
+class TestUnmatchedJournals:
+    def test_a_named_journal_with_no_papers_is_reported(self, make_paper):
+        """A misspelled journal used to fail completely silently."""
+        policy = JournalPolicy.build(fields=["medicine"], extra_journals=["Gut Microbs"])
+        tools = ResearchTools(
+            question="Q", client=FakeClient([make_paper(journal_name="Nature")]), policy=policy
+        )
+        tools.search_literature("q")
+        assert tools.unmatched_journals() == ["gut microbs"]
+
+    def test_a_named_journal_that_did_appear_is_not_reported(self, make_paper):
+        policy = JournalPolicy.build(fields=[], extra_journals=["Gut Microbes"])
+        papers = [make_paper(journal_name="Gut Microbes")]
+        tools = ResearchTools(question="Q", client=FakeClient(papers), policy=policy)
+        tools.search_literature("q")
+        assert tools.unmatched_journals() == []
+
+    def test_it_counts_papers_the_policy_rejected_too(self, make_paper):
+        """Seeing the journal at all is what matters — a paper dropped by the
+        year filter still proves the name was spelled right."""
+        policy = JournalPolicy.build(fields=["medicine"], extra_journals=["Nutrients"])
+        tools = ResearchTools(
+            question="Q", client=FakeClient([make_paper(journal_name="Nutrients")]), policy=policy
+        )
+        tools.search_literature("q")
+        assert tools.unmatched_journals() == []
+
+    def test_nothing_named_means_nothing_reported(self, make_paper):
+        tools = ResearchTools(question="Q", client=FakeClient([make_paper(journal_name="Nature")]))
+        tools.search_literature("q")
+        assert tools.unmatched_journals() == []
+
+    def test_the_saved_report_carries_it(self, make_paper):
+        policy = JournalPolicy.build(fields=["medicine"], extra_journals=["Gut Microbs"])
+        tools = ResearchTools(
+            question="Q", client=FakeClient([make_paper(journal_name="Nature")]), policy=policy
+        )
+        tools.search_literature("q")
+        tools.save_research_report("S", [], "Q")
+        assert tools.last_report["unmatched_journals"] == ["gut microbs"]

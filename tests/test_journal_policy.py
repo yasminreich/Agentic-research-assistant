@@ -8,11 +8,16 @@ import pytest
 
 from app.journals import (
     DEFAULT_POLICY,
+    FIELD_ALIASES,
+    FIELD_GROUPS,
     FIELD_LABELS,
     HIGH_IMPACT_JOURNALS,
     JOURNALS_BY_FIELD,
     JournalPolicy,
     UnknownFieldError,
+    is_high_impact,
+    normalize_journal_name,
+    resolve_fields,
 )
 
 
@@ -161,3 +166,87 @@ class TestImmutability:
         before = set(HIGH_IMPACT_JOURNALS)
         JournalPolicy.build(extra_journals=["Poultry Weekly"]).allowed.add("scratch")
         assert HIGH_IMPACT_JOURNALS == before
+
+
+class TestFieldGroups:
+    def test_every_field_appears_in_exactly_one_group(self):
+        grouped = [key for keys in FIELD_GROUPS.values() for key in keys]
+        assert sorted(grouped) == sorted(JOURNALS_BY_FIELD)
+        assert len(grouped) == len(set(grouped)), "a field is in two groups"
+
+    def test_no_group_is_empty(self):
+        for name, keys in FIELD_GROUPS.items():
+            assert keys, f"group {name!r} has no fields"
+
+
+class TestRetiredFieldKeys:
+    def test_cs_ai_still_resolves_after_the_split(self):
+        """A saved UI selection or an older API caller must not start erroring."""
+        policy = JournalPolicy.build(fields=["cs_ai"])
+        assert policy.fields == frozenset({"ai_ml", "computer_science"})
+        assert policy.allows("Journal of Machine Learning Research") is True
+        assert policy.allows("Communications of the ACM") is True
+
+    def test_resolve_fields_preserves_order_and_deduplicates(self):
+        assert resolve_fields(["medicine", "cs_ai", "ai_ml"]) == [
+            "medicine",
+            "ai_ml",
+            "computer_science",
+        ]
+
+    def test_every_alias_target_is_a_real_field(self):
+        for retired, replacements in FIELD_ALIASES.items():
+            for key in replacements:
+                assert key in JOURNALS_BY_FIELD, f"{retired} -> unknown {key}"
+
+
+class TestNormalizationOfPeriods:
+    @pytest.mark.parametrize(
+        ("reported", "expected"),
+        [
+            # OpenAlex spells the Nature Reviews family with an internal period.
+            ("Nature reviews. Immunology", "nature reviews immunology"),
+            ("Nature Reviews Immunology", "nature reviews immunology"),
+            ("Nature reviews. Microbiology", "nature reviews microbiology"),
+            # Abbreviated forms collapse onto their alias.
+            ("J. Dairy Sci.", "journal of dairy science"),
+        ],
+    )
+    def test_internal_periods_are_separators(self, reported, expected):
+        assert normalize_journal_name(reported) == expected
+
+    @pytest.mark.parametrize(
+        "reported",
+        ["Nature reviews. Immunology", "Nature Reviews Immunology", "J. Dairy Sci."],
+    )
+    def test_both_spellings_are_accepted(self, reported):
+        assert is_high_impact(reported) is True
+
+
+class TestNewDisciplines:
+    @pytest.mark.parametrize(
+        ("field", "journal"),
+        [
+            ("microbiome", "The ISME Journal"),
+            ("microbiome", "Gut Microbes"),
+            ("immunology", "Science Immunology"),
+            ("immunology", "Cellular and Molecular Immunology"),
+            ("bioinformatics", "Genome Research"),
+            ("ai_ml", "Journal of Machine Learning Research"),
+            ("computer_science", "Communications of the ACM"),
+            ("security_privacy", "USENIX Security Symposium"),
+            ("statistics_data_science", "Biometrika"),
+            ("robotics", "Science Robotics"),
+            ("hci", "ACM Transactions on Computer-Human Interaction"),
+            ("education", "Review of Educational Research"),
+            ("law_policy", "Harvard Law Review"),
+        ],
+    )
+    def test_the_field_accepts_its_journal(self, field, journal):
+        assert JournalPolicy.build(fields=[field]).allows(journal) is True
+
+    def test_mega_journals_stay_excluded(self):
+        """Frontiers/Nutrients/IJMS are peer-reviewed but not selective. Keeping
+        them out is the point of the filter; users can add them per run."""
+        for name in ["Frontiers in Immunology", "Nutrients", "Scientific Reports"]:
+            assert is_high_impact(name) is False

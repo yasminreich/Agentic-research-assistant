@@ -160,6 +160,15 @@
     }
     .fields input { margin: 0; flex: none; }
     .fields .count { color: var(--muted); font-size: 0.78rem; }
+    .field-group { margin-bottom: 12px; }
+    .group-name {
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
     .field-actions {
       display: flex;
       gap: 14px;
@@ -220,21 +229,24 @@
 
           <div class="row">
             <label>Fields to search</label>
-            <div class="fields" id="fields"></div>
+            <div id="fields"></div>
             <div class="field-actions">
               <button type="button" class="link-btn" id="select-all">Select all</button>
               <button type="button" class="link-btn" id="select-none">Clear all</button>
             </div>
             <div class="hint">Only papers from journals in the checked fields are
-              considered. Leave everything checked to search all of them.</div>
+              considered. Narrowing to the fields your question belongs to usually
+              gives better papers than leaving everything checked.</div>
           </div>
 
           <div class="row">
             <label for="extra-journals">Also accept these journals</label>
             <textarea id="extra-journals"
-              placeholder="One per line, e.g.&#10;Journal of Dairy Science&#10;Poultry Science"></textarea>
+              placeholder="e.g.&#10;Gut Microbes, mSystems&#10;The ISME Journal"></textarea>
             <div class="hint">Use the full journal title as it appears on the paper.
-              These are added on top of the fields you checked.</div>
+              Separate several with new lines, commas or semicolons — but a journal
+              whose own title contains a comma needs its own line. These are added
+              on top of the fields you checked.</div>
           </div>
         </div>
       </details>
@@ -262,6 +274,10 @@
     const fieldsEl = document.getElementById("fields");
     const extraEl = document.getElementById("extra-journals");
 
+    // Set from each response so showError() can include it without threading the
+    // whole payload through every call site.
+    let lastUnmatched = [];
+
     // Remember the password on this device so testers enter it only once.
     passwordEl.value = localStorage.getItem("ra_password") || "";
 
@@ -287,12 +303,17 @@
     fetch("/journals")
       .then(r => r.json())
       .then(data => {
-        fieldsEl.innerHTML = data.fields.map(f => {
-          // Default to every field checked; otherwise honour the saved selection.
-          const checked = !savedFields || savedFields.includes(f.key) ? " checked" : "";
-          return '<label><input type="checkbox" value="' + escapeHtml(f.key) + '"' + checked + ' />' +
-                 '<span>' + escapeHtml(f.label) +
-                 ' <span class="count">(' + f.count + ')</span></span></label>';
+        // Rendered in the server's groups so two dozen checkboxes stay scannable.
+        fieldsEl.innerHTML = data.groups.map(group => {
+          const boxes = group.fields.map(f => {
+            // Default to every field checked; otherwise honour the saved selection.
+            const checked = !savedFields || savedFields.includes(f.key) ? " checked" : "";
+            return '<label><input type="checkbox" value="' + escapeHtml(f.key) + '"' + checked + ' />' +
+                   '<span>' + escapeHtml(f.label) +
+                   ' <span class="count">(' + f.count + ')</span></span></label>';
+          }).join("");
+          return '<div class="field-group"><div class="group-name">' +
+                 escapeHtml(group.name) + '</div><div class="fields">' + boxes + '</div></div>';
         }).join("");
       })
       .catch(() => {
@@ -356,7 +377,7 @@
     }
 
     function renderResults(data) {
-      let html = "";
+      let html = unmatchedHtml(data.unmatched_journals);
       if (data.summary) {
         html += '<div class="summary"><h2>Summary</h2>' + renderMarkdown(data.summary) + "</div>";
       }
@@ -399,11 +420,22 @@
              'these journals</em> and run again.</div><ul>' + items + "</ul></div>";
     }
 
+    // Journals the user named that no paper came from. Almost always a typo or
+    // a title OpenAlex spells differently — silence here used to be a dead end.
+    function unmatchedHtml(unmatched) {
+      if (!unmatched || !unmatched.length) return "";
+      return '<div class="excluded"><h3>No papers came from these journals</h3>' +
+             '<div class="hint">You named them, but nothing in this run was published ' +
+             'there. Check the spelling against the title as it appears on the paper.</div>' +
+             '<ul>' + unmatched.map(j => "<li>" + escapeHtml(j) + "</li>").join("") + '</ul></div>';
+    }
+
     function showError(msg, rejected) {
       errorEl.textContent = msg;
       errorEl.classList.add("show");
-      resultsEl.innerHTML = excludedHtml(rejected);
+      resultsEl.innerHTML = excludedHtml(rejected) + unmatchedHtml(lastUnmatched);
     }
+
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -414,7 +446,9 @@
       if (question.length < 3) { showError("Please enter a research question."); return; }
 
       const fields = checkedFields();
-      const extraJournals = extraEl.value.split("\n").map(t => t.trim()).filter(Boolean);
+      // Newlines, semicolons and commas all separate entries. A journal whose
+      // own title contains a comma must go on its own line — see the hint.
+      const extraJournals = extraEl.value.split(/[\n;,]/).map(t => t.trim()).filter(Boolean);
       const minYear = minYearEl.value ? parseInt(minYearEl.value, 10) : null;
 
       // Remember the selection on this device so it survives a reload.
@@ -458,6 +492,7 @@
         }
 
         const data = await resp.json();
+        lastUnmatched = data.unmatched_journals || [];
         if (!data.saved && !data.summary) {
           const hasExclusions = (data.rejected_journals || []).length > 0;
           showError(

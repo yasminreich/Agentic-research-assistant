@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .config import get_settings
-from .journals import FIELD_LABELS, JOURNALS_BY_FIELD
+from .journals import FIELD_GROUPS, FIELD_LABELS, JOURNALS_BY_FIELD
 from .limits import DailyRunLimiter
 from .workflow import ConfigurationError, run_research
 
@@ -65,6 +65,8 @@ class ResearchResponse(BaseModel):
     # Journals the run's filter turned away, most frequent first. Lets the UI
     # explain an empty result instead of just showing nothing.
     rejected_journals: list[dict] = []
+    # Journals the caller named that no paper came from — usually a typo.
+    unmatched_journals: list[str] = []
     json_path: str | None = None
     markdown_path: str | None = None
 
@@ -100,17 +102,24 @@ def journals() -> dict:
     `app/journals.py` only and the UI never carries a stale copy.
     """
     return {
-        "fields": [
+        # Grouped so the page can render readable sections rather than two
+        # dozen undifferentiated checkboxes. Order here is the display order.
+        "groups": [
             {
-                "key": key,
-                "label": FIELD_LABELS.get(key, key),
-                "count": len(journals_in_field),
-                "examples": sorted(journals_in_field)[:3],
+                "name": group,
+                "fields": [
+                    {
+                        "key": key,
+                        "label": FIELD_LABELS.get(key, key),
+                        "count": len(JOURNALS_BY_FIELD[key]),
+                        "examples": sorted(JOURNALS_BY_FIELD[key])[:3],
+                    }
+                    for key in keys
+                ],
             }
-            for key, journals_in_field in sorted(
-                JOURNALS_BY_FIELD.items(), key=lambda kv: FIELD_LABELS.get(kv[0], kv[0])
-            )
+            for group, keys in FIELD_GROUPS.items()
         ],
+        "total_fields": len(JOURNALS_BY_FIELD),
         "total_journals": len(set().union(*JOURNALS_BY_FIELD.values())),
     }
 

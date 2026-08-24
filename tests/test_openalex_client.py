@@ -9,7 +9,13 @@ from __future__ import annotations
 import pytest
 import requests
 
-from app.openalex_client import MAX_LIMIT, OpenAlexClient, OpenAlexError
+from app.openalex_client import (
+    MAX_LIMIT,
+    OpenAlexBudgetExhausted,
+    OpenAlexClient,
+    OpenAlexError,
+    _is_budget_exhausted,
+)
 
 # A trimmed but realistically shaped OpenAlex work record.
 WORK = {
@@ -218,3 +224,58 @@ class TestRetryBehaviour:
         with pytest.raises(OpenAlexError, match="400"):
             OpenAlexClient(mailto="", session=session).search("q")
         assert len(session.calls) == 1
+
+
+class TestDailyBudgetExhausted:
+    """OpenAlex meters usage; the free daily allowance can run out mid-session.
+
+    Every request then 429s with an "Insufficient budget" body until midnight
+    UTC. Retrying cannot help, so it must fail fast and say what happened —
+    otherwise a run burns five backoff sleeps and reports a generic error.
+    """
+
+    BUDGET_BODY = (
+        '{"error":"Rate limit exceeded","message":"Insufficient budget. This request '
+        'costs $0.001 but you only have $0 remaining. Resets at midnight UTC."}'
+    )
+
+    def test_it_raises_immediately_without_retrying(self, no_real_sleeping):
+        session = FakeSession([FakeResponse(429, text=self.BUDGET_BODY)])
+        with pytest.raises(OpenAlexBudgetExhausted, match="daily request budget"):
+            OpenAlexClient(mailto="", session=session).search("q")
+        assert len(session.calls) == 1, "a spent budget must not be retried"
+        assert no_real_sleeping == [], "no point backing off"
+
+    def test_the_message_says_when_it_recovers(self):
+        session = FakeSession([FakeResponse(429, text=self.BUDGET_BODY)])
+        with pytest.raises(OpenAlexBudgetExhausted) as exc:
+            OpenAlexClient(mailto="", session=session).search("q")
+        assert "midnight UTC" in str(exc.value)
+
+    def test_an_ordinary_429_is_still_retried(self):
+        """ "Slow down" is transient and must keep its backoff behaviour."""
+        session = FakeSession(
+            [FakeResponse(429, text="Too Many Requests"), FakeResponse(payload={"results": [WORK]})]
+        )
+        assert len(OpenAlexClient(mailto="", session=session).search("q")) == 1
+        assert len(session.calls) == 2
+
+    def test_it_is_catchable_as_a_plain_openalex_error(self):
+        """Callers that only know about OpenAlexError keep working."""
+        session = FakeSession([FakeResponse(429, text=self.BUDGET_BODY)])
+        with pytest.raises(OpenAlexError):
+            OpenAlexClient(mailto="", session=session).search("q")
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ('{"message":"Insufficient budget. This request costs $0.001"}', True),
+        ("Rate limit exceeded: budget spent", True),
+        ("Too Many Requests - please slow down", False),
+        ("Rate limit exceeded", False),
+        ("", False),
+    ],
+)
+def test_budget_detection(body, expected):
+    assert _is_budget_exhausted(body) is expected

@@ -21,7 +21,7 @@ from typing import Annotated
 
 from .config import Settings, get_settings
 from .filters import deduplicate_by_recency, filter_high_impact, rejected_journal_counts
-from .journals import DEFAULT_POLICY, JournalPolicy
+from .journals import DEFAULT_POLICY, JournalPolicy, normalize_journal_name
 from .openalex_client import OpenAlexClient, OpenAlexError
 from .persistence import save_research_output
 
@@ -52,6 +52,10 @@ class ResearchTools:
         # Journals dropped by the policy this run, aggregated across searches,
         # so a zero-result run can tell the user what it turned away.
         self.rejected: Counter[str] = Counter()
+        # Normalized journal names this run has actually seen a paper from.
+        # Used to tell the user which of their typed journals never matched —
+        # a misspelling used to fail completely silently.
+        self.seen_journals: set[str] = set()
         # Full metadata of every curated paper we've surfaced, keyed by id.
         self.collected: dict[str, dict] = {}
         # Result of the most recent save_research_report call.
@@ -83,6 +87,11 @@ class ResearchTools:
         except OpenAlexError as exc:
             logger.warning("OpenAlex search failed for %r: %s", query, exc)
             return json.dumps({"query": query, "error": str(exc), "papers": []}, ensure_ascii=False)
+
+        for paper in raw:
+            normalized = normalize_journal_name(paper.journal_name)
+            if normalized:
+                self.seen_journals.add(normalized)
 
         high_impact = filter_high_impact(raw, self.policy)
         curated = deduplicate_by_recency(high_impact)
@@ -154,6 +163,7 @@ class ResearchTools:
         result["summary"] = summary
         result["papers"] = selected
         result["rejected_journals"] = self.top_rejected_journals()
+        result["unmatched_journals"] = self.unmatched_journals()
         self.last_report = result
 
         return (
@@ -166,3 +176,13 @@ class ResearchTools:
     def top_rejected_journals(self, limit: int = 10) -> list[dict]:
         """Journals the policy excluded across this run, most frequent first."""
         return [{"journal": name, "count": n} for name, n in self.rejected.most_common(limit)]
+
+    def unmatched_journals(self) -> list[str]:
+        """The caller's named journals that no paper in this run came from.
+
+        Usually a typo or a title OpenAlex spells differently. Reporting them
+        turns a silent no-op into something the user can fix; without this, a
+        misspelled entry looks identical to a journal that simply had no
+        relevant papers.
+        """
+        return sorted(self.policy.extra - self.seen_journals)
