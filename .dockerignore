@@ -1,0 +1,27 @@
+# Keep the build context small and free of secrets/artifacts.
+.git/
+.github/
+.gitattributes
+.gitignore
+
+.env
+*.docx
+
+output/
+docs/
+tests/
+scripts/
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.vscode/
+.idea/
+.DS_Store

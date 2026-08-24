@@ -4,6 +4,9 @@
 # Generated research reports
 output/
 
+# Planning material kept locally, not published
+project scope.docx
+
 # Python
 __pycache__/
 *.py[cod]
@@ -11,6 +14,9 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Editor / OS
 .vscode/
