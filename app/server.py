@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(
     title="Automated Research Assistant",
-    description="Multi-agent literature review over the Paperclip database.",
+    description="Multi-agent literature review over OpenAlex.",
     version="0.1.0",
 )
 

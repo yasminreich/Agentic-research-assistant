@@ -2,7 +2,7 @@
 
 Every test in this suite is offline: no network calls and no ANTHROPIC_API_KEY.
 The two seams that make that possible already existed in the app —
-`PaperclipClient` accepts an injected `requests.Session`, and `ResearchTools`
+`OpenAlexClient` accepts an injected `requests.Session`, and `ResearchTools`
 accepts an injected client.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.paperclip_client import Paper
+from app.openalex_client import Paper
 
 
 @pytest.fixture

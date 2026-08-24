@@ -11,7 +11,7 @@ import json
 import pytest
 
 from app.journals import JournalPolicy
-from app.paperclip_client import PaperclipError
+from app.openalex_client import OpenAlexError
 from app.tools import ABSTRACT_PREVIEW_CHARS, ResearchTools
 
 
@@ -100,7 +100,7 @@ class TestSearchLiterature:
 
     def test_an_api_failure_is_reported_not_raised(self, tools_for):
         """The agent must see an error it can react to, not a crashed tool call."""
-        tools, _ = tools_for(error=PaperclipError("upstream down"))
+        tools, _ = tools_for(error=OpenAlexError("upstream down"))
         payload = json.loads(tools.search_literature("q"))
         assert payload["papers"] == []
         assert "upstream down" in payload["error"]
