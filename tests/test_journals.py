@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.journals import ALIASES, HIGH_IMPACT_JOURNALS, is_high_impact, normalize_journal_name
+from app.journals import (
+    ALIASES,
+    HIGH_IMPACT_JOURNALS,
+    JOURNALS_BY_FIELD,
+    is_high_impact,
+    normalize_journal_name,
+)
 
 
 class TestNormalizeJournalName:
@@ -74,27 +80,44 @@ class TestIsHighImpact:
             assert journal == journal.lower().strip(), f"{journal!r} is not normalized"
 
 
-class TestCoverageGaps:
-    """Fields the current allowlist cannot serve.
+class TestDisciplineCoverage:
+    """Fields that the original ~38-journal allowlist could not serve.
 
-    These are `xfail(strict=True)` rather than deleted: they document a real
-    limitation and will fail loudly the moment it is fixed, which is the signal
-    to drop the marker.
+    These began life as xfail(strict=True) markers documenting the gap. The
+    field restructure closed it, so the markers came off.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Allowlist is ~38 mostly biomedical journals; agriculture is not covered yet.",
-    )
-    def test_journal_of_dairy_science_is_accepted(self):
-        assert is_high_impact("Journal of Dairy Science") is True
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Computer science and economics venues are not covered yet.",
-    )
     @pytest.mark.parametrize(
-        "name", ["Journal of Machine Learning Research", "American Economic Review"]
+        "name",
+        [
+            "Journal of Dairy Science",
+            "Poultry Science",
+            "Journal of Animal Science",
+            "Nature Food",
+        ],
     )
-    def test_other_disciplines_are_accepted(self, name):
+    def test_agriculture_and_food_journals_are_accepted(self, name):
         assert is_high_impact(name) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Journal of Machine Learning Research",
+            "Nature Machine Intelligence",
+            "Advances in Neural Information Processing Systems",
+        ],
+    )
+    def test_computer_science_venues_are_accepted(self, name):
+        assert is_high_impact(name) is True
+
+    @pytest.mark.parametrize(
+        "name", ["American Economic Review", "Econometrica", "Psychological Science"]
+    )
+    def test_social_science_journals_are_accepted(self, name):
+        assert is_high_impact(name) is True
+
+    def test_the_dairy_entry_is_the_full_title_not_a_fragment(self):
+        """Regression: `"dairy science"` alone can never match, because
+        matching is exact after normalization, not substring."""
+        assert "journal of dairy science" in JOURNALS_BY_FIELD["agriculture_food"]
+        assert is_high_impact("Dairy Science") is False
