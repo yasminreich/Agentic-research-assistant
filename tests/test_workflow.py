@@ -166,6 +166,7 @@ class TestResultShape:
             "papers",
             "rejected_journals",
             "unmatched_journals",
+            "verification",
             "json_path",
             "markdown_path",
             "saved",

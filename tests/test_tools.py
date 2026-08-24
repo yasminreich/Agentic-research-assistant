@@ -249,3 +249,86 @@ class TestUnmatchedJournals:
         tools.search_literature("q")
         tools.save_research_report("S", [], "Q")
         assert tools.last_report["unmatched_journals"] == ["gut microbs"]
+
+
+class TestVerificationIntegration:
+    """The tool layer must run the checks and attach the results."""
+
+    ABSTRACT = (
+        "Gut microbiota regulate host immune development through short-chain fatty "
+        "acids. We profiled 240 stool samples and found that butyrate producers were "
+        "depleted in patients with active disease."
+    )
+    REAL_QUOTE = "We profiled 240 stool samples and found that butyrate producers were depleted"
+
+    def _tools(self, make_paper):
+        paper = make_paper(
+            "Microbiota and immunity",
+            journal_name="Nature",
+            paper_id="W111111",
+            abstract=self.ABSTRACT,
+        )
+        return ResearchTools(question="Q", client=FakeClient([paper]))
+
+    def test_a_faithful_report_verifies_clean(self, make_paper):
+        tools = self._tools(make_paper)
+        tools.search_literature("q")
+        tools.save_research_report(
+            "Butyrate producers are depleted (W111111).",
+            ["W111111"],
+            "Q",
+            [{"paper_id": "W111111", "quote": self.REAL_QUOTE}],
+        )
+        v = tools.last_report["verification"]
+        assert v["ok"] is True
+        assert v["citations"]["verified_count"] == 1
+        assert v["quotes"]["tally"]["supported"] == 1
+
+    def test_an_invented_citation_is_caught(self, make_paper):
+        """The model cites a paper no search ever returned."""
+        tools = self._tools(make_paper)
+        tools.search_literature("q")
+        tools.save_research_report("As established elsewhere (W9999999).", ["W111111"], "Q", [])
+        v = tools.last_report["verification"]
+        assert v["ok"] is False
+        assert v["citations"]["unverified"] == ["W9999999"]
+
+    def test_an_invented_quote_is_caught(self, make_paper):
+        """The citation is real but the finding attributed to it is not."""
+        tools = self._tools(make_paper)
+        tools.search_literature("q")
+        tools.save_research_report(
+            "Butyrate cures the disease outright (W111111).",
+            ["W111111"],
+            "Q",
+            [{"paper_id": "W111111", "quote": "Butyrate cured every patient within a week"}],
+        )
+        v = tools.last_report["verification"]
+        assert v["ok"] is False
+        assert v["quotes"]["tally"]["not_found"] == 1
+
+    def test_a_dropped_paper_id_is_surfaced_not_just_logged(self, make_paper):
+        tools = self._tools(make_paper)
+        tools.search_literature("q")
+        tools.save_research_report("Summary (W111111).", ["W111111", "W888888"], "Q", [])
+        assert tools.last_report["verification"]["unknown_paper_ids"] == ["W888888"]
+
+    def test_quotes_are_attached_to_their_paper(self, make_paper):
+        """So the UI and the Markdown report can show evidence beside the source."""
+        tools = self._tools(make_paper)
+        tools.search_literature("q")
+        tools.save_research_report(
+            "Summary (W111111).",
+            ["W111111"],
+            "Q",
+            [{"paper_id": "W111111", "quote": self.REAL_QUOTE}],
+        )
+        paper = tools.last_report["papers"][0]
+        assert paper["evidence"][0]["status"] == "supported"
+
+    def test_evidence_is_optional(self, make_paper):
+        """A run that supplies no quotes must still save and verify citations."""
+        tools = self._tools(make_paper)
+        tools.search_literature("q")
+        tools.save_research_report("Summary (W111111).", ["W111111"], "Q")
+        assert tools.last_report["verification"]["ok"] is True

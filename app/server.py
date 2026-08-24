@@ -67,6 +67,9 @@ class ResearchResponse(BaseModel):
     rejected_journals: list[dict] = []
     # Journals the caller named that no paper came from — usually a typo.
     unmatched_journals: list[str] = []
+    # Mechanical checks on the summary: are its citations real, and do its
+    # quotes appear in the abstracts they are attributed to?
+    verification: dict = {}
     json_path: str | None = None
     markdown_path: str | None = None
 

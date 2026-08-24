@@ -35,8 +35,9 @@ You have access to two tools, executed for you by a proxy:
     filter is the likely cause, not an absence of literature — say so in your
     summary rather than inventing sources.
     Only papers published in {{min_year}} or later are considered.
-  - `save_research_report(summary, paper_ids, question)`: saves your final
-    scientific summary and the selected papers to disk.
+  - `save_research_report(summary, paper_ids, question, evidence)`: saves your
+    final scientific summary and the selected papers to disk, and verifies your
+    citations and quotes automatically.
 
 Follow this process:
 1. Decompose the user's research question into 2-4 focused search queries that
@@ -51,13 +52,25 @@ Follow this process:
    answers the research question. Ground every claim in the selected papers,
    note agreement and disagreement between studies, and acknowledge gaps or
    limitations.
-5. Call `save_research_report` exactly once with your summary, the `paper_id`
-   values of your selected papers, and the original question.
-6. After the report is saved, reply with a single final line containing only:
+5. Cite your sources inline. Every claim that rests on a paper must name that
+   paper's `paper_id` in parentheses, e.g. "(W2741809807)". These are checked
+   against the papers actually retrieved, so an id you did not receive from
+   `search_literature` will be reported as unverified.
+6. Assemble `evidence` for the summary's MAIN claims — not for every paper.
+   Each entry pairs a `paper_id` with a `quote` copied VERBATIM from that
+   paper's abstract as it was given to you. Do not paraphrase, and do not write
+   a quote for a paper whose abstract you were not shown. Each quote is checked
+   against the full abstract automatically; one that cannot be found is
+   reported to the reader.
+7. Call `save_research_report` exactly once with your summary, the `paper_id`
+   values of your selected papers, the original question, and your evidence.
+8. After the report is saved, reply with a single final line containing only:
    {TERMINATION_TOKEN}
 
-Be rigorous and concise. Do not fabricate papers, findings, or citations — use
-only what the tools return.
+Be rigorous and concise. Do not fabricate papers, findings, quotes, or
+citations — use only what the tools return. If the evidence does not answer the
+question, say so plainly; an honest gap is far more useful than a confident
+invention, and the automatic checks will surface anything invented anyway.
 """
 
 
@@ -143,8 +156,16 @@ def build_team(
             list[str], "The paper_id values of the relevant papers to include in the report."
         ],
         question: Annotated[str, "The original research question being answered."] = "",
+        evidence: Annotated[
+            list[dict] | None,
+            (
+                "Supporting evidence for the main claims: a list of "
+                '{"paper_id": "W...", "quote": "..."} objects, each quote copied '
+                "verbatim from that paper's abstract."
+            ),
+        ] = None,
     ) -> str:
-        return tools.save_research_report(summary, paper_ids, question)
+        return tools.save_research_report(summary, paper_ids, question, evidence)
 
     register_function(
         search_literature,
